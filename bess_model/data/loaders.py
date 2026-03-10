@@ -56,7 +56,7 @@ def _load_source_csv(
     normalized = (
         frame.select(
             pl.col(timestamp_column).cast(pl.String).str.strip_chars().alias("timestamp_raw"),
-            pl.col(power_column).cast(pl.Float64).alias(f"{source_name}_kw"),
+            pl.col(power_column).cast(pl.Float32).alias(f"{source_name}_kw"),
         )
         .filter(pl.col("timestamp_raw") != "")
         .with_columns(

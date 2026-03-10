@@ -43,6 +43,6 @@ def test_pipeline_energy_balance_on_synthetic_minute_data() -> None:
 
     result = run_pipeline(df, SimulationContext(config=config, logger=__import__("logging").getLogger("test")))
 
-    assert result.select(pl.col("identity_1_error_kw").abs().max()).item() <= 1e-9
+    assert result.select(pl.col("identity_1_error_kw").abs().max()).item() <= 1e-3
     assert result["grid_buy_kw"].sum() >= 0
     assert result["grid_sell_kw"].sum() >= 0

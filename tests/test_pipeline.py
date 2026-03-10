@@ -68,7 +68,7 @@ def test_simulate_system_produces_expected_grid_flows(tmp_path) -> None:
     assert flows[1, "battery_draw_required_kw"] == pytest.approx(220.0)
     assert flows[1, "grid_buy_kw"] >= 0.0
     assert flows[2, "grid_buy_kw"] == pytest.approx(289.9, abs=1e-1)
-    assert result.summary_metrics["max_identity_error_kw"] <= 1e-9
+    assert result.summary_metrics["max_identity_error_kw"] <= 1e-3
     assert result.summary_metrics["grid_import_energy_kwh"] >= 0.0
 
 

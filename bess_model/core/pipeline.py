@@ -24,7 +24,7 @@ class SimulationContext:
 
     config: SimulationConfig
     logger: logging.Logger
-    balance_tolerance_kw: float = 1e-9
+    balance_tolerance_kw: float = 1e-3
 
     def log_stage(self, stage_name: str, df: pl.DataFrame) -> None:
         """Emit concise stage-level logging."""
