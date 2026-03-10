@@ -4,6 +4,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 lib/
 lib64/
 # Packages
@@ -23,6 +24,3 @@ instance/
 
 # Output files
 output/
-
-
-.venv/
