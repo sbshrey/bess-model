@@ -162,6 +162,33 @@
     });
   };
 
+  const initializeProgressBar = () => {
+    document.addEventListener("submit", (event) => {
+      const form = event.target;
+      // We check if the submitter (like a button with formaction) overrides the action
+      // Or fallback to the form's action itself.
+      const submitter = event.submitter;
+      const actionUrl = submitter?.getAttribute("formaction") || form.getAttribute("action") || "";
+      
+      if (actionUrl.includes("/run/simulate") || actionUrl.includes("/run/size")) {
+        // Prevent stacking if somehow clicked twice
+        if (!document.querySelector(".global-progress")) {
+          const progress = document.createElement("div");
+          progress.className = "global-progress";
+          document.body.prepend(progress);
+          
+          // disable submit buttons inside this form to prevent double submission
+          const buttons = form.querySelectorAll("button[type='submit']");
+          buttons.forEach(b => {
+             b.style.pointerEvents = "none";
+             b.style.opacity = "0.7";
+          });
+        }
+      }
+    });
+  };
+
   initializeSidebarToggle();
   initializeChartModal();
+  initializeProgressBar();
 })();

@@ -40,7 +40,7 @@ OUTPUT_SECTIONS: tuple[OutputSection, ...] = (
     OutputSection(
         "04_battery_capacity_cycles.csv",
         "Battery Capacity Based on Cycles",
-        ("timestamp", "current_cycle", "cumulative_degradation", "capacity_now_kwh"),
+        ("timestamp", "current_cycle", "cumulative_degradation", "capacity_now_kw_min"),
     ),
     OutputSection("05_excess_deficit_power.csv", "Excess or Deficit Power", ("timestamp", "excess_power_kw", "deficit_power_kw")),
     OutputSection(
@@ -134,7 +134,7 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
         pl.Series("cum_total_kw_min", metrics["cum_total"]),
         pl.Series("current_cycle", metrics["current_cycle"]),
         pl.Series("cumulative_degradation", metrics["cumulative_degradation"]),
-        pl.Series("capacity_now_kwh", metrics["capacity_now_kwh"]),
+        pl.Series("capacity_now_kw_min", metrics["capacity_now_kw_min"]),
         pl.Series("excess_power_kw", metrics["excess_power_kw"]),
         pl.Series("deficit_power_kw", metrics["deficit_power_kw"]),
         pl.Series("battery_opening_kw_min", metrics["battery_opening_kw_min"]),
@@ -201,7 +201,7 @@ def _simulate_section_accounting(
 
     current_cycle = np.zeros(row_count, dtype=np.float64)
     cumulative_degradation = np.zeros(row_count, dtype=np.float64)
-    capacity_now_kwh = np.zeros(row_count, dtype=np.float64)
+    capacity_now_kw_min = np.zeros(row_count, dtype=np.float64)
     excess_power_kw = np.zeros(row_count, dtype=np.float64)
     deficit_power_kw = np.zeros(row_count, dtype=np.float64)
     battery_opening_kw_min = np.zeros(row_count, dtype=np.float64)
@@ -239,77 +239,120 @@ def _simulate_section_accounting(
     bess_finish_kw_min = np.zeros(row_count, dtype=np.float64)
     identity_2_ok = np.zeros(row_count, dtype=np.int8)
 
+    nominal_capacity_kw_min = float(config.capacity_kwh) * 60.0
     nominal_capacity_kwh = float(config.capacity_kwh)
-    prior_closing = max(config.initial_soc_fraction, 0.0) * nominal_capacity_kwh * 60.0
-    cumulative_drawn = 0.0
-    cumulative_stored = 0.0
+    prior_closing_kw_min = max(config.initial_soc_fraction, 0.0) * nominal_capacity_kw_min
+    cumulative_drawn_kw_min = 0.0
+    cumulative_stored_kw_min = 0.0
     prior_charge_count = 0.0
 
     for index in range(row_count):
         current_cycle[index] = prior_charge_count
         cumulative_degradation[index] = prior_charge_count * config.degradation_per_cycle
-        capacity_now_kwh[index] = max(nominal_capacity_kwh * (1.0 - cumulative_degradation[index]), 0.0)
-        capacity_now_kw_min = capacity_now_kwh[index] * 60.0
+        capacity_now_kw_min[index] = max(nominal_capacity_kw_min * (1.0 - cumulative_degradation[index]), 0.0)
 
-        battery_opening_kw_min[index] = min(max(prior_closing, 0.0), capacity_now_kw_min)
+        # state in kWh bounded by capacity
+        battery_opening_kw_min[index] = min(max(prior_closing_kw_min, 0.0), capacity_now_kw_min[index])
+        
         excess = max(float(total_generation[index]) - float(total_consumption[index]), 0.0)
         deficit = max(float(total_consumption[index]) - float(total_generation[index]), 0.0)
         excess_power_kw[index] = excess
         deficit_power_kw[index] = deficit
 
-        required_draw = min(battery_opening_kw_min[index], deficit)
+        # available power (kW) we can practically draw based on stored minimum energy
+        available_discharge_kw = battery_opening_kw_min[index]
+        
+        # discharge capped by state of charge
+        required_draw = min(available_discharge_kw, deficit)
         battery_draw_required_kw[index] = required_draw
+        
+        # calculate loss on the drawn amount
         battery_draw_c_rate[index] = _rounded_c_rate(required_draw, nominal_capacity_kwh)
         battery_draw_loss_rate[index] = _lookup_loss_rate(battery_draw_c_rate[index], config.discharge_loss_table)
         battery_draw_loss_kw[index] = battery_draw_loss_rate[index] * required_draw
-        battery_draw_final_kw[index] = required_draw + battery_draw_loss_kw[index] if battery_opening_kw_min[index] > deficit else required_draw
-        cumulative_drawn += battery_draw_final_kw[index]
-        battery_draw_cumulative_kw_min[index] = cumulative_drawn
+        
+        # total drawn from battery is required + loss, capped by what's actually there
+        draw_total = required_draw + battery_draw_loss_kw[index]
+        if draw_total > available_discharge_kw:
+            amount_over_limit = draw_total - available_discharge_kw
+            # shrink the required draw explicitly? If required + loss > available...
+            # Actually, to be perfectly physically consistent: we can only extract total battery energy.
+            # Thus battery_draw_final_kw is minimum of required+loss vs available
+            battery_draw_final_kw[index] = available_discharge_kw
+            # which means required draw actually satisfied is available - loss roughly.
+            # We'll just cap it simply:
+            battery_draw_loss_kw[index] = battery_draw_loss_rate[index] * (available_discharge_kw / (1 + battery_draw_loss_rate[index]))
+            battery_draw_required_kw[index] = battery_draw_final_kw[index] - battery_draw_loss_kw[index]
+        else:
+            battery_draw_final_kw[index] = draw_total
 
+        cumulative_drawn_kw_min += battery_draw_final_kw[index]
+        battery_draw_cumulative_kw_min[index] = cumulative_drawn_kw_min
+
+        remaining_headroom_kw = max(capacity_now_kw_min[index] - battery_opening_kw_min[index], 0.0)
         store_available = 0.0
-        remaining_headroom_kw_min = max(capacity_now_kw_min - battery_opening_kw_min[index], 0.0)
-        if excess > 0.0 and remaining_headroom_kw_min > 0.0:
-            store_available = min(excess, remaining_headroom_kw_min)
+        if excess > 0.0 and remaining_headroom_kw > 0.0:
+            # charge strictly proportional to remaining headroom
+            store_available = min(excess, remaining_headroom_kw)
+            
         battery_store_available_kw[index] = store_available
         battery_store_c_rate[index] = _rounded_c_rate(store_available, nominal_capacity_kwh)
         battery_store_loss_rate[index] = _lookup_loss_rate(battery_store_c_rate[index], config.charge_loss_table)
         battery_store_loss_kw[index] = battery_store_loss_rate[index] * store_available
-        battery_store_final_kw[index] = min(
-            max(store_available - battery_store_loss_kw[index], 0.0),
-            remaining_headroom_kw_min,
-        )
-        cumulative_stored += battery_store_final_kw[index]
-        battery_store_cumulative_kw_min[index] = cumulative_stored
+        
+        # cap what goes in by remaining headroom
+        # the net energy entering battery state is store_available - loss
+        net_store = max(store_available - battery_store_loss_kw[index], 0.0)
+        if net_store > remaining_headroom_kw:
+            battery_store_final_kw[index] = remaining_headroom_kw
+            # recalculate required inputs
+            store_available = remaining_headroom_kw / (1 - battery_store_loss_rate[index])
+            battery_store_loss_kw[index] = store_available - battery_store_final_kw[index]
+            battery_store_available_kw[index] = store_available
+        else:
+            battery_store_final_kw[index] = net_store
 
-        grid_buy_kw[index] = max(deficit - battery_draw_final_kw[index], 0.0)
-        grid_sell_kw[index] = max(excess - store_available, 0.0)
+        cumulative_stored_kw_min += battery_store_final_kw[index]
+        battery_store_cumulative_kw_min[index] = cumulative_stored_kw_min
 
+        # Recalculate grid flow now that we know exactly what battery did
+        grid_buy_kw[index] = max(deficit - battery_draw_required_kw[index], 0.0)
+        grid_sell_kw[index] = max(excess - battery_store_available_kw[index], 0.0)
+
+        # closing state physics
         battery_closing_kw_min[index] = max(
             min(
                 battery_opening_kw_min[index] - battery_draw_final_kw[index] + battery_store_final_kw[index],
-                capacity_now_kw_min,
+                capacity_now_kw_min[index],
             ),
             0.0,
         )
         soc_kw_min[index] = battery_closing_kw_min[index]
-        if nominal_capacity_kwh > 0:
-            soc_fraction[index] = soc_kw_min[index] / nominal_capacity_kwh / 60.0
-            discharge_cycle_count[index] = cumulative_drawn / nominal_capacity_kwh / 60.0
-            charge_cycle_count[index] = cumulative_stored / nominal_capacity_kwh / 60.0
+        
+        # normalized views
+        if nominal_capacity_kw_min > 0:
+            soc_fraction[index] = soc_kw_min[index] / nominal_capacity_kw_min
+            discharge_cycle_count[index] = cumulative_drawn_kw_min / nominal_capacity_kw_min
+            charge_cycle_count[index] = cumulative_stored_kw_min / nominal_capacity_kw_min
+        
         soc_pct[index] = soc_fraction[index] * 100.0
         cum_charge_count[index] = discharge_cycle_count[index] + charge_cycle_count[index]
 
+        # Validated energy identities
         energy_sources_kw[index] = total_generation[index] + battery_draw_final_kw[index] + grid_buy_kw[index]
         energy_uses_kw[index] = total_consumption[index] + battery_store_final_kw[index] + grid_sell_kw[index]
-        energy_losses_kw[index] = (battery_draw_final_kw[index] - required_draw) + battery_store_loss_kw[index]
+        energy_losses_kw[index] = battery_draw_loss_kw[index] + battery_store_loss_kw[index]
+        
         identity_1_error_kw[index] = energy_sources_kw[index] - energy_uses_kw[index] - energy_losses_kw[index]
         identity_1_ok[index] = int(abs(identity_1_error_kw[index]) <= IDENTITY_TOLERANCE)
 
         bess_start_kw_min[index] = battery_opening_kw_min[index]
-        bess_discharge_kw[index] = required_draw
-        bess_discharge_loss_kw[index] = battery_draw_final_kw[index] - required_draw
-        bess_charge_kw[index] = store_available
-        bess_charge_loss_kw[index] = store_available - battery_store_final_kw[index]
+        bess_discharge_kw[index] = battery_draw_required_kw[index]
+        bess_discharge_loss_kw[index] = battery_draw_loss_kw[index]
+        bess_charge_kw[index] = battery_store_available_kw[index]
+        bess_charge_loss_kw[index] = battery_store_loss_kw[index]
+        
+        # BESS start/finish in kWh for identity 2
         bess_finish_kw_min[index] = (
             bess_start_kw_min[index]
             - bess_discharge_kw[index]
@@ -319,7 +362,7 @@ def _simulate_section_accounting(
         )
         identity_2_ok[index] = int(abs(max(bess_finish_kw_min[index], 0.0) - battery_closing_kw_min[index]) <= IDENTITY_TOLERANCE)
 
-        prior_closing = battery_closing_kw_min[index]
+        prior_closing_kw_min = battery_closing_kw_min[index]
         prior_charge_count = cum_charge_count[index]
 
     return {
@@ -328,7 +371,7 @@ def _simulate_section_accounting(
         "cum_total": cum_total,
         "current_cycle": current_cycle,
         "cumulative_degradation": cumulative_degradation,
-        "capacity_now_kwh": capacity_now_kwh,
+        "capacity_now_kw_min": capacity_now_kw_min,
         "excess_power_kw": excess_power_kw,
         "deficit_power_kw": deficit_power_kw,
         "battery_opening_kw_min": battery_opening_kw_min,

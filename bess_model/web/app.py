@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Sequence
+import math
 
 from flask import Flask, flash, redirect, render_template, request, send_file, url_for
 
@@ -35,6 +36,32 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
     app.config["SECRET_KEY"] = "bess-model-dev"
     app.config["CONFIG_PATH"] = str(Path(config_path).resolve())
 
+    def generate_page_window(current_page: int, total_pages: int, max_window: int = 7) -> list[int | None]:
+        """Generate a list of page numbers and None for ellipses."""
+        if total_pages <= max_window:
+            return list(range(1, total_pages + 1))
+        
+        # We always want the first, last, and current page.
+        # Figure out the layout like: 1 ... 4 5 6 ... 100
+        window = []
+        if current_page < 5:
+            window.extend(range(1, 6))
+            window.append(None)
+            window.append(total_pages)
+        elif current_page > total_pages - 4:
+            window.append(1)
+            window.append(None)
+            window.extend(range(total_pages - 4, total_pages + 1))
+        else:
+            window.append(1)
+            window.append(None)
+            window.extend(range(current_page - 1, current_page + 2))
+            window.append(None)
+            window.append(total_pages)
+        return window
+
+    app.jinja_env.globals["generate_page_window"] = generate_page_window
+
     @app.get("/")
     def dashboard():
         config_file = Path(app.config["CONFIG_PATH"])
@@ -52,11 +79,24 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         chart_cards = []
         date_filter = None
         metric_cards = load_metric_cards(config)
+        
+        page = int(request.args.get("page", "1"))
+        page_size = int(request.args.get("page_size", "20"))
+        total_rows = 0
+        total_pages = 1
+
         if selected:
             selected_path = resolve_output_file(config, selected)
             if selected_path.suffix == ".csv":
                 filtered_csv = load_filtered_csv(selected_path, start_date=start_date, end_date=end_date)
-                preview_columns, preview_rows = build_preview_table(df=filtered_csv.df)
+                total_rows = filtered_csv.df.height
+                total_pages = max(1, math.ceil(total_rows / page_size))
+                page = max(1, min(page, total_pages))
+                
+                start_idx = (page - 1) * page_size
+                paginated_df = filtered_csv.df.slice(start_idx, page_size)
+
+                preview_columns, preview_rows = build_preview_table(df=paginated_df, limit=page_size)
                 chart_svg = build_chart_svg(df=filtered_csv.df)
                 chart_cards = build_chart_cards(df=filtered_csv.df)
                 date_filter = filtered_csv.date_filter
@@ -75,6 +115,10 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             chart_svg=chart_svg,
             chart_cards=chart_cards,
             date_filter=date_filter,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            total_rows=total_rows,
         )
 
     @app.post("/config/save")

@@ -244,7 +244,8 @@ def load_csv_page(
             if predicate is not None and not predicate(row):
                 continue
             if start_index <= total_rows < end_index:
-                rows.append(dict(row))
+                formatted_row = {k: _format_cell_value(v) for k, v in row.items()}
+                rows.append(formatted_row)
                 row_numbers.append(index)
             total_rows += 1
 
@@ -352,7 +353,7 @@ def build_preview_table(
     for row in rows:
         normalized_rows.append(
             {
-                key: value.isoformat(sep=" ") if hasattr(value, "isoformat") else value
+                key: _format_cell_value(value)
                 for key, value in row.items()
             }
         )
@@ -802,6 +803,29 @@ def _build_date_filter_state(
         total_rows=total_rows,
     )
 
+
+def _format_cell_value(val: Any) -> Any:
+    """Format a cell value for display, applying reasonable float rounding."""
+    if hasattr(val, "isoformat"):
+        return val.isoformat(sep=" ")
+    
+    if isinstance(val, float):
+        if math.isnan(val):
+            return "NaN"
+        return round(val, 6)
+        
+    if isinstance(val, str):
+        try:
+            if "." in val or "e" in val.lower():
+                fval = float(val)
+                if math.isnan(fval):
+                    return "NaN"
+                # Keep it as a string to preserve the CSV DictReader format semantics
+                return str(round(fval, 6))
+        except ValueError:
+            pass
+            
+    return val
 
 def _build_row_date_predicate(
     start_date: str | None,

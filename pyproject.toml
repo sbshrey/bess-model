@@ -9,8 +9,9 @@ description = "Scalable BESS sizing and simulation framework for minute-level re
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "Flask>=3.1.0",
-  "numba>=0.60.0",
+    "Flask>=3.1.0",
+    "gunicorn>=21.2.0",
+    "numba>=0.60.0",
   "numpy>=2.0.0",
   "polars>=1.22.0",
   "PyYAML>=6.0.2",

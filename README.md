@@ -6,7 +6,7 @@ Python framework for simulating and sizing a Battery Energy Storage System
 ## Features
 
 - Reads mismatched solar and wind CSV files and aligns them to a 1-minute grid
-- Runs a section-based accounting simulation aligned to the reference sizing model
+- Runs a section-based accounting simulation using model-driven logic and normalized kWh constraints
 - Simulates battery charge, discharge, SOC, degradation, and loss lookups
 - Sweeps multiple battery capacities and recommends an optimal size
 - Writes minute-level outputs to Parquet and summary metrics to the console
@@ -39,9 +39,9 @@ bess-model-web --config config.example.yaml --host 127.0.0.1 --port 5000
 
 ## Notes
 
-- Source power values are normalized to `kW`
-- Battery capacity and SOC are stored in `kWh`
-- Internal energy calculations use `power_kw / 60`
+- The original spreadsheet acts as a business-logic layout reference only – internal logic enforces strictly physically valid constraints.
+- Battery state, degradation, and capacity strictly enforce flow limits using `kW-min` mapping natively matching the 1-minute sequence basis scale.
+- Power calculations, grid limits, sales, and losses evaluate purely in `kW`.
 - Linear interpolation is applied only to short gaps; longer gaps are set to zero
 
 ## Section CSVs

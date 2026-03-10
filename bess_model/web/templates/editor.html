@@ -103,11 +103,21 @@
       </div>
       <div class="pagination sticky-pagination">
         {% if csv_page.page > 1 %}
-          <a class="button button-ghost" href="{{ url_for('edit_csv', relative_path=relative_path, page=csv_page.page - 1, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
+          <a class="button button-ghost pagination-page" href="{{ url_for('edit_csv', relative_path=relative_path, page=csv_page.page - 1, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
         {% endif %}
-        <span>Page {{ csv_page.page }} / {{ csv_page.total_pages }} · {{ csv_page.total_rows }} rows</span>
+        
+        <div class="pagination-numbers">
+          {% for p in generate_page_window(csv_page.page, csv_page.total_pages) %}
+            {% if p is none %}
+              <span class="pagination-ellipsis">&hellip;</span>
+            {% else %}
+              <a class="pagination-page {% if p == csv_page.page %}active{% endif %}" href="{{ url_for('edit_csv', relative_path=relative_path, page=p, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">{{ p }}</a>
+            {% endif %}
+          {% endfor %}
+        </div>
+
         {% if csv_page.page < csv_page.total_pages %}
-          <a class="button button-ghost" href="{{ url_for('edit_csv', relative_path=relative_path, page=csv_page.page + 1, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Next</a>
+          <a class="button button-ghost pagination-page" href="{{ url_for('edit_csv', relative_path=relative_path, page=csv_page.page + 1, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Next</a>
         {% endif %}
       </div>
     </form>

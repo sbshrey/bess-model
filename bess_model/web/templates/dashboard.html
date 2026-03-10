@@ -155,8 +155,26 @@
       <div class="panel-header">
         <div>
           <h2>Data Preview</h2>
-          <p class="section-subtitle">First {{ preview_rows|length }} rows in the current date window</p>
+          <p class="section-subtitle">Page {{ page }} of {{ total_pages }} ({{ total_rows }} rows total)</p>
         </div>
+        {% if selected_file %}
+        <form method="get" action="{{ url_for('dashboard') }}" class="table-controls-form">
+          <input type="hidden" name="file" value="{{ selected_file }}">
+          {% if date_filter and date_filter.enabled %}
+          <input type="hidden" name="start_date" value="{{ date_filter.start_date }}">
+          <input type="hidden" name="end_date" value="{{ date_filter.end_date }}">
+          {% endif %}
+          <label>
+            <span>Rows per page</span>
+            <select name="page_size" onchange="this.form.submit()">
+              <option value="10" {% if page_size == 10 %}selected{% endif %}>10</option>
+              <option value="20" {% if page_size == 20 %}selected{% endif %}>20</option>
+              <option value="50" {% if page_size == 50 %}selected{% endif %}>50</option>
+              <option value="100" {% if page_size == 100 %}selected{% endif %}>100</option>
+            </select>
+          </label>
+        </form>
+        {% endif %}
       </div>
       {% if preview_rows %}
         <div class="table-shell dashboard-table-shell">
@@ -178,6 +196,25 @@
               {% endfor %}
             </tbody>
           </table>
+        </div>
+        <div class="pagination sticky-pagination dashboard-pagination" style="margin-top: 1rem;">
+          {% if page > 1 %}
+            <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page - 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
+          {% endif %}
+          
+          <div class="pagination-numbers">
+            {% for p in generate_page_window(page, total_pages) %}
+              {% if p is none %}
+                <span class="pagination-ellipsis">&hellip;</span>
+              {% else %}
+                <a class="pagination-page {% if p == page %}active{% endif %}" href="{{ url_for('dashboard', file=selected_file, page=p, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">{{ p }}</a>
+              {% endif %}
+            {% endfor %}
+          </div>
+          
+          {% if page < total_pages %}
+            <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page + 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Next</a>
+          {% endif %}
         </div>
       {% else %}
         <p class="empty-state">Run a simulation or choose an output CSV to inspect.</p>
