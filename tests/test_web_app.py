@@ -5,7 +5,7 @@ import csv
 from pathlib import Path
 
 from bess_model.web.app import create_app
-from bess_model.web.services import build_chart_cards, load_csv_page, run_sizing_from_frontend
+from bess_model.web.services import build_chart_cards, load_csv_page
 
 
 def test_dashboard_renders_and_simulation_route_runs(tmp_path) -> None:
@@ -55,9 +55,7 @@ def test_dashboard_renders_and_simulation_route_runs(tmp_path) -> None:
                 "  charge_efficiency: 1.0",
                 "  discharge_efficiency: 1.0",
                 "  initial_soc_kwh: 0.0",
-                "sizing:",
-                "  capacities_kwh: [1000.0]",
-                "  objective: min_grid_import_then_smallest",
+
             ]
         ),
         encoding="utf-8",
@@ -116,13 +114,7 @@ def test_dashboard_renders_and_simulation_route_runs(tmp_path) -> None:
     )
     assert aligned_editor.status_code == 200
 
-    _, sizing_path = run_sizing_from_frontend(Path(config_path))
-    sizing_charts = build_chart_cards(sizing_path)
-    assert any(chart.title == "Sizing Curve" for chart in sizing_charts)
-    sizing_svg = next(chart.svg for chart in sizing_charts if chart.title == "Sizing Curve")
-    assert "Battery Capacity (kWh)" in sizing_svg
-    assert "Grid Import Energy (kWh)" in sizing_svg
-    assert "1,000" in sizing_svg
+
 
     filtered_page = load_csv_page(section_path, page=1, page_size=1, start_date="2025-01-01", end_date="2025-01-01")
     assert filtered_page.total_rows == 2

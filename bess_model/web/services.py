@@ -25,7 +25,7 @@ from bess_model.core.pipeline import (
 )
 from bess_model.flows.section_outputs import OUTPUT_SECTIONS, write_section_outputs
 from bess_model.results import SimulationResult
-from bess_model.sizing.optimizer import run_sizing
+
 
 
 @dataclass(frozen=True)
@@ -115,16 +115,6 @@ def run_simulation_from_frontend(config_path: Path) -> tuple[SimulationConfig, S
     return config, result, stage_paths
 
 
-def run_sizing_from_frontend(config_path: Path) -> tuple[SimulationConfig, Path]:
-    """Run the sizing sweep and write the results CSV."""
-    config = SimulationConfig.from_yaml(config_path)
-    sizing_result = run_sizing(config)
-    output_dir = Path(config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    result_path = output_dir / f"{config.plant_name}_sizing_results.csv"
-    sizing_result.results.write_csv(result_path)
-    return config, result_path
-
 
 def list_output_files(config: SimulationConfig) -> list[OutputFileInfo]:
     """List output files for the current plant, newest first."""
@@ -159,9 +149,9 @@ def choose_default_output_file(config: SimulationConfig, outputs: list[OutputFil
         return None
 
     preferred = [
+        f"{config.plant_name}_sections/00_aligned_input.csv",
         f"{config.plant_name}_sections/11_soc_calculations.csv",
         f"{config.plant_name}_sections/06_battery_opening_closing.csv",
-        f"{config.plant_name}_sizing_results.csv",
         f"{config.plant_name}_summary.csv",
     ]
     by_path = {item.relative_path: item for item in outputs}
@@ -188,22 +178,31 @@ def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
     if summary_df.height == 0:
         return []
     row = summary_df.to_dicts()[0]
+    grid_import = float(row.get("grid_import_energy_kwh", 0.0))
+    grid_export = float(row.get("grid_export_energy_kwh", 0.0))
+    net_impact = grid_export - grid_import
+    impact_label = "Net Export" if net_impact >= 0 else "Net Import"
+    
+    cycles = float(row.get("cumulative_charge_count", 0.0))
+    
+    final_capacity = float(row.get("final_degraded_capacity_kwh", config.battery.capacity_kwh))
+    soh_pct = (final_capacity / float(config.battery.capacity_kwh)) * 100.0 if float(config.battery.capacity_kwh) > 0 else 0.0
+    
     return [
-        MetricCard("Rows", _format_number(row.get("rows", 0), digits=0), "Aligned minute rows"),
         MetricCard(
-            "Grid Import",
-            _format_number(row.get("grid_import_energy_kwh", 0.0)),
-            "kWh consumed from grid",
+            "Net Grid Impact",
+            f"{_format_number(abs(net_impact))} kWh",
+            impact_label,
         ),
         MetricCard(
-            "Grid Buy / Sale",
-            f"{_format_number(row.get('grid_import_energy_kwh', 0.0))} / {_format_number(row.get('grid_export_energy_kwh', 0.0))}",
-            "kWh",
+            "Total Cycles",
+            _format_number(cycles, digits=1),
+            "Equivalent full cycles",
         ),
         MetricCard(
-            "Final SOC",
-            _format_number(row.get("final_soc_pct", 0.0), digits=1),
-            "% of nominal capacity",
+            "Capacity Health (SOH)",
+            f"{_format_number(soh_pct, digits=1)}%",
+            f"{_format_number(final_capacity)} kWh remaining",
         ),
     ]
 
@@ -394,13 +393,6 @@ def build_chart_cards(
             [
                 _chart_card(
                     df,
-                    "Sizing Curve",
-                    "Grid import against battery capacity",
-                    ["grid_import_energy_kwh"],
-                    x_column="battery_capacity_kwh",
-                ),
-                _chart_card(
-                    df,
                     "Grid Outcome",
                     "Grid buy and sale versus capacity",
                     ["grid_export_energy_kwh", "grid_import_energy_kwh"],
@@ -493,10 +485,10 @@ def build_chart_svg_from_df(
         df = df.gather_every(step)
 
     width = 720
-    height = 220
+    height = 240
     left_padding = 66
     right_padding = 18
-    top_padding = 18
+    top_padding = 40
     bottom_padding = 46
     chart_height = height - top_padding - bottom_padding
     chart_width = width - left_padding - right_padding
@@ -504,27 +496,53 @@ def build_chart_svg_from_df(
     x_axis_label = _infer_x_axis_label(x_column)
 
     x_values, x_tick_values, x_tick_labels = _build_x_axis_scale(df, x_column)
+    original_x_values = df[x_column].to_list()
     max_value = max(float(df.select(pl.max_horizontal([pl.col(column) for column in columns]).max()).item()), 1.0)
-    colors = ["#e4572e", "#17bebb", "#ffc914", "#2e282a", "#76b041"]
+    colors = ["#4f46e5", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6"]
 
     series_svg: list[str] = []
+    hover_svg: list[str] = []
     x_min = min(x_values)
     x_max = max(x_values)
     x_span = max(x_max - x_min, 1.0)
     for color_index, column in enumerate(columns):
         values = df[column].cast(pl.Float64).to_list()
         points: list[str] = []
+        color = colors[color_index % len(colors)]
         for index, value in enumerate(values):
+            if value is None:
+                continue
             x = left_padding + ((x_values[index] - x_min) / x_span) * chart_width
             y = height - bottom_padding - ((float(value) / max_value) * chart_height)
             points.append(f"{x:.2f},{y:.2f}")
-        color = colors[color_index % len(colors)]
-        label_y = top_padding + 14 * color_index
+            
+            # Custom SVG tooltip group
+            tooltip_x = max(min(x, width - 110), 110)
+            tooltip_y = max(y - 20, 60)
+            x_str = str(original_x_values[index])
+            
+            hover_svg.append(
+                f'<g class="chart-point-group">'
+                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="6" fill="transparent" class="chart-point-hover" />'
+                f'<g class="chart-tooltip-group">'
+                f'<rect x="{tooltip_x - 100:.2f}" y="{tooltip_y - 44:.2f}" width="200" height="38" fill="var(--ink)" fill-opacity="0.9" rx="6" style="filter: drop-shadow(0 4px 6px rgba(0,0,0,0.15))" />'
+                f'<text x="{tooltip_x:.2f}" y="{tooltip_y - 28:.2f}" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="500" pointer-events="none">'
+                f'{html.escape(x_str)}'
+                f'</text>'
+                f'<text x="{tooltip_x:.2f}" y="{tooltip_y - 12:.2f}" text-anchor="middle" fill="white" font-size="11" font-weight="600" pointer-events="none">'
+                f'{html.escape(column)}: {_format_number(value)}'
+                f'</text>'
+                f'</g>'
+                f'</g>'
+            )
+            
+        legend_x = left_padding + (color_index * 130)
         series_svg.append(
-            f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{" ".join(points)}" />'
+            f'<polyline fill="none" stroke="{color}" stroke-width="2.5" points="{" ".join(points)}" />'
         )
         series_svg.append(
-            f'<text x="{left_padding}" y="{label_y}" fill="{color}" font-size="10">{html.escape(column)}</text>'
+            f'<rect x="{legend_x}" y="10" width="10" height="10" fill="{color}" rx="2" />'
+            f'<text x="{legend_x + 16}" y="19" fill="#475569" font-size="11" font-weight="600">{html.escape(column)}</text>'
         )
 
     y_ticks = _build_y_ticks(max_value)
@@ -532,36 +550,37 @@ def build_chart_svg_from_df(
     for tick_value in y_ticks:
         y = height - bottom_padding - ((tick_value / max_value) * chart_height)
         tick_svg.append(
-            f'<line x1="{left_padding - 5}" y1="{y:.2f}" x2="{left_padding}" y2="{y:.2f}" stroke="#8d7b68" stroke-width="1" />'
+            f'<line x1="{left_padding - 5}" y1="{y:.2f}" x2="{left_padding}" y2="{y:.2f}" stroke="#cbd5e1" stroke-width="1" />'
         )
         tick_svg.append(
-            f'<text x="{left_padding - 9}" y="{y + 3:.2f}" text-anchor="end" fill="#5c4d3d" font-size="9">{html.escape(_format_tick_value(tick_value))}</text>'
+            f'<text x="{left_padding - 9}" y="{y + 3:.2f}" text-anchor="end" fill="#64748b" font-size="10">{html.escape(_format_tick_value(tick_value))}</text>'
         )
         tick_svg.append(
-            f'<line x1="{left_padding}" y1="{y:.2f}" x2="{width - right_padding}" y2="{y:.2f}" stroke="#e7dcc8" stroke-width="1" />'
+            f'<line x1="{left_padding}" y1="{y:.2f}" x2="{width - right_padding}" y2="{y:.2f}" stroke="#f1f5f9" stroke-width="1" />'
         )
 
     for tick_value, tick_label in zip(x_tick_values, x_tick_labels, strict=True):
         x = left_padding + ((tick_value - x_min) / x_span) * chart_width
         tick_svg.append(
-            f'<line x1="{x:.2f}" y1="{height - bottom_padding}" x2="{x:.2f}" y2="{height - bottom_padding + 5}" stroke="#8d7b68" stroke-width="1" />'
+            f'<line x1="{x:.2f}" y1="{height - bottom_padding}" x2="{x:.2f}" y2="{height - bottom_padding + 5}" stroke="#cbd5e1" stroke-width="1" />'
         )
         tick_svg.append(
-            f'<text x="{x:.2f}" y="{height - bottom_padding + 16}" text-anchor="middle" fill="#5c4d3d" font-size="9">{html.escape(tick_label)}</text>'
+            f'<text x="{x:.2f}" y="{height - bottom_padding + 16}" text-anchor="middle" fill="#64748b" font-size="10">{html.escape(tick_label)}</text>'
         )
 
     return (
         f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
         f'class="chart-svg" role="img" aria-label="Flow chart">'
-        f'<rect x="0" y="0" width="{width}" height="{height}" fill="#f7f0dd" rx="18" />'
+        f'<rect x="0" y="0" width="{width}" height="{height}" fill="#ffffff" rx="12" />'
         f'<line x1="{left_padding}" y1="{height - bottom_padding}" x2="{width - right_padding}" y2="{height - bottom_padding}" '
-        f'stroke="#8d7b68" stroke-width="1" />'
+        f'stroke="#cbd5e1" stroke-width="1.5" />'
         f'<line x1="{left_padding}" y1="{top_padding}" x2="{left_padding}" y2="{height - bottom_padding}" '
-        f'stroke="#8d7b68" stroke-width="1" />'
+        f'stroke="#cbd5e1" stroke-width="1.5" />'
         f'{"".join(tick_svg)}'
-        f'<text x="{left_padding + (chart_width / 2):.2f}" y="{height - 8}" text-anchor="middle" fill="#5c4d3d" font-size="10">{html.escape(x_axis_label)}</text>'
-        f'<text x="16" y="{top_padding + (chart_height / 2):.2f}" text-anchor="middle" fill="#5c4d3d" font-size="10" transform="rotate(-90 16 {top_padding + (chart_height / 2):.2f})">{html.escape(y_axis_label)}</text>'
+        f'<text x="{left_padding + (chart_width / 2):.2f}" y="{height - 8}" text-anchor="middle" fill="#475569" font-weight="500" font-size="11">{html.escape(x_axis_label)}</text>'
+        f'<text x="16" y="{top_padding + (chart_height / 2):.2f}" text-anchor="middle" fill="#475569" font-weight="500" font-size="11" transform="rotate(-90 16 {top_padding + (chart_height / 2):.2f})">{html.escape(y_axis_label)}</text>'
         f'{"".join(series_svg)}'
+        f'{"".join(hover_svg)}'
         "</svg>"
     )
 

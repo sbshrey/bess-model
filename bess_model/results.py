@@ -14,10 +14,3 @@ class SimulationResult:
     minute_flows: pl.DataFrame
     summary_metrics: dict[str, float | int | str]
 
-
-@dataclass(frozen=True)
-class SizingResult:
-    """Results for a capacity sweep."""
-
-    results: pl.DataFrame
-    optimal_capacity_kwh: float

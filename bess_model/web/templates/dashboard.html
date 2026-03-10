@@ -42,36 +42,11 @@
         <div class="button-stack">
           <button type="submit" class="button button-secondary">Save Config</button>
           <button type="submit" formaction="{{ url_for('run_simulation') }}" class="button">Run Simulation</button>
-          <button type="submit" formaction="{{ url_for('run_size') }}" class="button button-secondary">Run Sizing</button>
         </div>
       </form>
     </section>
 
-    <section class="panel sidebar-panel sidebar-outputs-panel">
-      <div class="panel-header panel-header-stack">
-        <h2>Outputs</h2>
-        <p>{{ outputs|length }} files</p>
-      </div>
-      <div class="output-scroll">
-        <div class="file-list">
-          {% for item in outputs %}
-            <article class="file-card {% if selected_file == item.relative_path %}is-active{% endif %}">
-              <div class="file-copy">
-                <a href="{{ url_for('dashboard', file=item.relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}" class="file-name">{{ item.name }}</a>
-                <p>{{ item.relative_path }}</p>
-                <p>{{ '%.1f'|format(item.size_kb) }} KB · {{ item.modified_at }}</p>
-              </div>
-              <div class="file-actions">
-                <a class="button button-ghost" href="{{ url_for('download_file', relative_path=item.relative_path) }}">Download</a>
-                {% if item.name.endswith('.csv') %}
-                  <a class="button button-ghost" href="{{ url_for('edit_csv', relative_path=item.relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Edit</a>
-                {% endif %}
-              </div>
-            </article>
-          {% endfor %}
-        </div>
-      </div>
-    </section>
+
   </aside>
 
   <section class="content dashboard-content">
@@ -97,26 +72,55 @@
     </section>
 
     <section class="panel content-panel dashboard-chart-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Charts</h2>
-          <p class="section-subtitle">{{ selected_file or "Select a CSV output" }}</p>
-        </div>
-        {% if date_filter and date_filter.enabled %}
-          <form method="get" action="{{ url_for('dashboard') }}" class="range-form">
-            <input type="hidden" name="file" value="{{ selected_file or '' }}">
-            <label>
-              <span>Start</span>
-              <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
-            </label>
-            <label>
-              <span>End</span>
-              <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
-            </label>
-            <button type="submit" class="button button-ghost button-small">Apply</button>
-            <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}">Clear</a>
+      <div class="panel-header" style="display: flex; flex-direction: column; gap: 1rem; padding-bottom: 1rem;">
+        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+          <!-- File Selection Dropdown -->
+          <form method="get" action="{{ url_for('dashboard') }}" style="margin: 0; display: flex; align-items: center; gap: 0.75rem; flex-grow: 1; max-width: 600px;">
+            <label for="file-select" style="font-weight: 600; white-space: nowrap; margin: 0; font-size: 1.1rem; color: var(--text-muted);">File:</label>
+            <select id="file-select" name="file" onchange="this.form.submit()" class="file-selector" style="flex-grow: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); font-size: 1.0rem; font-weight: 500; background-color: var(--surface);">
+              {% for item in outputs %}
+                <option value="{{ item.relative_path }}" {% if selected_file == item.relative_path %}selected{% endif %}>
+                  {{ item.name }} ({{ '%.1f'|format(item.size_kb) }} KB)
+                </option>
+              {% endfor %}
+            </select>
+            {% if date_filter and date_filter.enabled %}
+              <input type="hidden" name="start_date" value="{{ date_filter.start_date }}">
+              <input type="hidden" name="end_date" value="{{ date_filter.end_date }}">
+            {% endif %}
           </form>
-        {% endif %}
+          
+          <!-- Download & Edit Buttons -->
+          {% if selected_file %}
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <a class="button button-ghost button-small" href="{{ url_for('download_file', relative_path=selected_file) }}" style="padding: 0.5rem 1rem;">Download</a>
+              {% if selected_file.endswith('.csv') %}
+                <a class="button button-ghost button-small" href="{{ url_for('edit_csv', relative_path=selected_file, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}" style="padding: 0.5rem 1rem;">Edit CSV</a>
+              {% endif %}
+            </div>
+          {% endif %}
+          
+          <div style="flex-grow: 1;"></div>
+          
+          <!-- Date Filter Form -->
+          {% if date_filter and date_filter.enabled %}
+            <form method="get" action="{{ url_for('dashboard') }}" class="range-form" style="margin: 0; display: flex; align-items: center; gap: 1rem; background: var(--surface); padding: 0.25rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);">
+              <input type="hidden" name="file" value="{{ selected_file or '' }}">
+              <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                <span style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin: 0;">Start</span>
+                <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}" style="border: none; background: transparent; padding: 0.25rem; font-size: 0.95rem;">
+              </label>
+              <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                <span style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin: 0;">End</span>
+                <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}" style="border: none; background: transparent; padding: 0.25rem; font-size: 0.95rem;">
+              </label>
+              <div style="display: flex; gap: 0.25rem;">
+                <button type="submit" class="button button-ghost button-small" style="padding: 0.25rem 0.75rem;">Apply</button>
+                <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}" style="padding: 0.25rem 0.75rem;">Clear</a>
+              </div>
+            </form>
+          {% endif %}
+        </div>
       </div>
       {% if date_filter and date_filter.enabled %}
         <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows from {{ date_filter.start_date }} to {{ date_filter.end_date }}.</p>

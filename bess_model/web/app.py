@@ -24,7 +24,6 @@ from bess_model.web.services import (
     recalculate_from_edited_output,
     resolve_output_file,
     run_simulation_from_frontend,
-    run_sizing_from_frontend,
     save_config_text,
     save_csv_page_edits,
 )
@@ -86,7 +85,15 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         total_pages = 1
 
         if selected:
-            selected_path = resolve_output_file(config, selected)
+            try:
+                selected_path = resolve_output_file(config, selected)
+            except FileNotFoundError:
+                flash(f"File not found: {selected}. It may have been deleted.", "error")
+                return redirect(url_for("dashboard"))
+            except ValueError as e:
+                flash(str(e), "error")
+                return redirect(url_for("dashboard"))
+                
             if selected_path.suffix == ".csv":
                 filtered_csv = load_filtered_csv(selected_path, start_date=start_date, end_date=end_date)
                 total_rows = filtered_csv.df.height
@@ -146,27 +153,26 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             flash(f"Simulation failed: {exc}", "error")
         return redirect(url_for("dashboard"))
 
-    @app.post("/run/size")
-    def run_size():
-        config_file = Path(app.config["CONFIG_PATH"])
-        try:
-            save_config_text(config_file, request.form["config_text"])
-            config, result_path = run_sizing_from_frontend(config_file)
-            flash(f"Sizing completed for {config.plant_name}: {result_path.name}", "success")
-        except Exception as exc:  # pragma: no cover - surfaced in UI only.
-            flash(f"Sizing failed: {exc}", "error")
-        return redirect(url_for("dashboard"))
 
     @app.get("/files/<path:relative_path>")
     def download_file(relative_path: str):
         config = SimulationConfig.from_yaml(app.config["CONFIG_PATH"])
-        path = resolve_output_file(config, relative_path)
+        try:
+            path = resolve_output_file(config, relative_path)
+        except (FileNotFoundError, ValueError):
+            flash("File not found.", "error")
+            return redirect(url_for("dashboard"))
         return send_file(path, as_attachment=True)
 
     @app.route("/edit/<path:relative_path>", methods=["GET", "POST"])
     def edit_csv(relative_path: str):
         config = SimulationConfig.from_yaml(app.config["CONFIG_PATH"])
-        path = resolve_output_file(config, relative_path)
+        try:
+            path = resolve_output_file(config, relative_path)
+        except (FileNotFoundError, ValueError):
+            flash("File not found.", "error")
+            return redirect(url_for("dashboard"))
+            
         if path.suffix.lower() != ".csv":
             flash("Only CSV files can be edited in the browser.", "error")
             return redirect(url_for("dashboard", file=relative_path))

@@ -129,15 +129,6 @@ class BatteryConfig:
 
 
 @dataclass(frozen=True)
-class SizingConfig:
-    """Battery sweep configuration."""
-
-    capacities_kwh: list[float] = field(default_factory=list)
-    power_kw_candidates: list[float] = field(default_factory=list)
-    objective: str = "min_grid_import_then_smallest"
-
-
-@dataclass(frozen=True)
 class SimulationConfig:
     """Top-level simulation configuration."""
 
@@ -147,14 +138,12 @@ class SimulationConfig:
     grid: GridConfig
     load: LoadConfig
     battery: BatteryConfig
-    sizing: SizingConfig
     output_dir: str = "output"
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SimulationConfig":
         """Build a typed config from a nested dictionary."""
         battery = _normalize_battery_payload(payload["battery"])
-        sizing = _normalize_sizing_payload(payload.get("sizing", {}), battery["duration_hours"])
         config = cls(
             plant_name=payload["plant_name"],
             data=DataConfig(**payload["data"]),
@@ -162,7 +151,6 @@ class SimulationConfig:
             grid=GridConfig(**payload["grid"]),
             load=LoadConfig(**payload["load"]),
             battery=BatteryConfig(**battery),
-            sizing=SizingConfig(**sizing),
             output_dir=payload.get("output_dir", "output"),
         )
         config.validate()
@@ -203,8 +191,6 @@ class SimulationConfig:
             raise ValueError("battery SOC bounds must satisfy 0 <= min <= max <= 1.")
         if self.preprocessing.max_interpolation_gap_minutes < 0:
             raise ValueError("max_interpolation_gap_minutes must be non-negative.")
-        if not self.sizing.capacities_kwh and not self.sizing.power_kw_candidates:
-            raise ValueError("sizing must define capacities_kwh or power_kw_candidates.")
 
 
 def _normalize_battery_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -266,21 +252,6 @@ def _normalize_battery_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "discharge_efficiency": discharge_efficiency,
     }
 
-
-def _normalize_sizing_payload(payload: dict[str, Any], duration_hours: float) -> dict[str, Any]:
-    normalized = dict(payload)
-    capacities = [float(value) for value in normalized.get("capacities_kwh", [])]
-    power_candidates = [float(value) for value in normalized.get("power_kw_candidates", [])]
-    if not capacities and power_candidates:
-        capacities = [value * duration_hours for value in power_candidates]
-    if not power_candidates and capacities:
-        divisor = duration_hours if duration_hours > 0 else 1.0
-        power_candidates = [value / divisor for value in capacities]
-    return {
-        "capacities_kwh": capacities,
-        "power_kw_candidates": power_candidates,
-        "objective": normalized.get("objective", "min_grid_import_then_smallest"),
-    }
 
 
 def _normalize_loss_table(
