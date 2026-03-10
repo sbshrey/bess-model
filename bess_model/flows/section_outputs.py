@@ -1,0 +1,383 @@
+"""Section-based accounting stage and CSV exports."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+import polars as pl
+
+if TYPE_CHECKING:
+    from bess_model.config import BatteryConfig
+    from bess_model.core.pipeline import SimulationContext
+
+IDENTITY_TOLERANCE = 1e-9
+
+
+@dataclass(frozen=True)
+class OutputSection:
+    """One section CSV export."""
+
+    file_name: str
+    title: str
+    columns: tuple[str, ...]
+
+
+OUTPUT_SECTIONS: tuple[OutputSection, ...] = (
+    OutputSection("01_wind_solar_generation.csv", "Wind & Solar Generation", ("timestamp", "wind_kw", "solar_kw", "total_generation_kw")),
+    OutputSection(
+        "02_cumulative_generation.csv",
+        "Cumulative Generation",
+        ("timestamp", "cum_wind_kw_min", "cum_solar_kw_min", "cum_total_kw_min"),
+    ),
+    OutputSection(
+        "03_output_profile.csv",
+        "Output Profile for 24 Hours",
+        ("timestamp", "output_profile_kw", "aux_consumption_kw", "total_consumption_kw"),
+    ),
+    OutputSection(
+        "04_battery_capacity_cycles.csv",
+        "Battery Capacity Based on Cycles",
+        ("timestamp", "current_cycle", "cumulative_degradation", "capacity_now_kwh"),
+    ),
+    OutputSection("05_excess_deficit_power.csv", "Excess or Deficit Power", ("timestamp", "excess_power_kw", "deficit_power_kw")),
+    OutputSection(
+        "06_battery_opening_closing.csv",
+        "Battery Opening or Closing",
+        ("timestamp", "battery_opening_kw_min", "battery_closing_kw_min"),
+    ),
+    OutputSection(
+        "07_power_from_battery.csv",
+        "Power from Battery",
+        (
+            "timestamp",
+            "battery_draw_required_kw",
+            "battery_draw_c_rate",
+            "battery_draw_loss_rate",
+            "battery_draw_loss_kw",
+            "battery_draw_final_kw",
+            "battery_draw_cumulative_kw_min",
+        ),
+    ),
+    OutputSection("08_consume_from_grid.csv", "Consume from Grid", ("timestamp", "grid_buy_kw")),
+    OutputSection(
+        "09_power_to_battery.csv",
+        "Power to Battery",
+        (
+            "timestamp",
+            "battery_store_available_kw",
+            "battery_store_c_rate",
+            "battery_store_loss_rate",
+            "battery_store_loss_kw",
+            "battery_store_final_kw",
+            "battery_store_cumulative_kw_min",
+        ),
+    ),
+    OutputSection("10_sell_to_grid.csv", "Sell to Grid", ("timestamp", "grid_sell_kw")),
+    OutputSection("11_soc_calculations.csv", "SOC Calculations", ("timestamp", "soc_kw_min", "soc_fraction", "soc_pct")),
+    OutputSection(
+        "12_battery_charge_cycles.csv",
+        "Number of Battery Charge Cycles",
+        ("timestamp", "discharge_cycle_count", "charge_cycle_count", "cum_charge_count"),
+    ),
+    OutputSection(
+        "13_identity_equation_1.csv",
+        "Identity Equation 1",
+        ("timestamp", "energy_sources_kw", "energy_uses_kw", "energy_losses_kw", "identity_1_error_kw", "identity_1_ok"),
+    ),
+    OutputSection(
+        "14_identity_equation_2.csv",
+        "Identity Equation 2",
+        (
+            "timestamp",
+            "bess_start_kw_min",
+            "bess_discharge_kw",
+            "bess_discharge_loss_kw",
+            "bess_charge_kw",
+            "bess_charge_loss_kw",
+            "bess_finish_kw_min",
+            "identity_2_ok",
+        ),
+    ),
+)
+
+
+def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl.DataFrame:
+    """Append the canonical section accounting columns."""
+    total_generation = df["total_generation_kw"].to_numpy()
+    wind = df["wind_kw"].to_numpy()
+    solar = df["solar_kw"].to_numpy()
+    if "output_profile_kw" in df.columns:
+        output_profile = df["output_profile_kw"].to_numpy()
+    else:
+        output_profile = np.full(df.height, context.config.load.output_profile_kw, dtype=np.float64)
+    if "aux_consumption_kw" in df.columns:
+        aux_consumption = df["aux_consumption_kw"].to_numpy()
+    else:
+        aux_consumption = np.full(df.height, context.config.load.aux_consumption_kw, dtype=np.float64)
+    if "total_consumption_kw" in df.columns:
+        total_consumption = df["total_consumption_kw"].to_numpy()
+    elif "site_load_kw" in df.columns:
+        total_consumption = df["site_load_kw"].to_numpy()
+    else:
+        total_consumption = output_profile + aux_consumption
+    metrics = _simulate_section_accounting(total_generation, total_consumption, wind, solar, context.config.battery)
+
+    result = df.with_columns(
+        pl.Series("output_profile_kw", output_profile),
+        pl.Series("aux_consumption_kw", aux_consumption),
+        pl.Series("total_consumption_kw", total_consumption),
+        pl.Series("cum_wind_kw_min", metrics["cum_wind"]),
+        pl.Series("cum_solar_kw_min", metrics["cum_solar"]),
+        pl.Series("cum_total_kw_min", metrics["cum_total"]),
+        pl.Series("current_cycle", metrics["current_cycle"]),
+        pl.Series("cumulative_degradation", metrics["cumulative_degradation"]),
+        pl.Series("capacity_now_kwh", metrics["capacity_now_kwh"]),
+        pl.Series("excess_power_kw", metrics["excess_power_kw"]),
+        pl.Series("deficit_power_kw", metrics["deficit_power_kw"]),
+        pl.Series("battery_opening_kw_min", metrics["battery_opening_kw_min"]),
+        pl.Series("battery_closing_kw_min", metrics["battery_closing_kw_min"]),
+        pl.Series("battery_draw_required_kw", metrics["battery_draw_required_kw"]),
+        pl.Series("battery_draw_c_rate", metrics["battery_draw_c_rate"]),
+        pl.Series("battery_draw_loss_rate", metrics["battery_draw_loss_rate"]),
+        pl.Series("battery_draw_loss_kw", metrics["battery_draw_loss_kw"]),
+        pl.Series("battery_draw_final_kw", metrics["battery_draw_final_kw"]),
+        pl.Series("battery_draw_cumulative_kw_min", metrics["battery_draw_cumulative_kw_min"]),
+        pl.Series("grid_buy_kw", metrics["grid_buy_kw"]),
+        pl.Series("battery_store_available_kw", metrics["battery_store_available_kw"]),
+        pl.Series("battery_store_c_rate", metrics["battery_store_c_rate"]),
+        pl.Series("battery_store_loss_rate", metrics["battery_store_loss_rate"]),
+        pl.Series("battery_store_loss_kw", metrics["battery_store_loss_kw"]),
+        pl.Series("battery_store_final_kw", metrics["battery_store_final_kw"]),
+        pl.Series("battery_store_cumulative_kw_min", metrics["battery_store_cumulative_kw_min"]),
+        pl.Series("grid_sell_kw", metrics["grid_sell_kw"]),
+        pl.Series("soc_kw_min", metrics["soc_kw_min"]),
+        pl.Series("soc_fraction", metrics["soc_fraction"]),
+        pl.Series("soc_pct", metrics["soc_pct"]),
+        pl.Series("discharge_cycle_count", metrics["discharge_cycle_count"]),
+        pl.Series("charge_cycle_count", metrics["charge_cycle_count"]),
+        pl.Series("cum_charge_count", metrics["cum_charge_count"]),
+        pl.Series("energy_sources_kw", metrics["energy_sources_kw"]),
+        pl.Series("energy_uses_kw", metrics["energy_uses_kw"]),
+        pl.Series("energy_losses_kw", metrics["energy_losses_kw"]),
+        pl.Series("identity_1_error_kw", metrics["identity_1_error_kw"]),
+        pl.Series("identity_1_ok", metrics["identity_1_ok"]),
+        pl.Series("bess_start_kw_min", metrics["bess_start_kw_min"]),
+        pl.Series("bess_discharge_kw", metrics["bess_discharge_kw"]),
+        pl.Series("bess_discharge_loss_kw", metrics["bess_discharge_loss_kw"]),
+        pl.Series("bess_charge_kw", metrics["bess_charge_kw"]),
+        pl.Series("bess_charge_loss_kw", metrics["bess_charge_loss_kw"]),
+        pl.Series("bess_finish_kw_min", metrics["bess_finish_kw_min"]),
+        pl.Series("identity_2_ok", metrics["identity_2_ok"]),
+    )
+    context.validate_balance(result)
+    return result
+
+
+def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
+    """Write one CSV per section."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for section in OUTPUT_SECTIONS:
+        path = target_dir / section.file_name
+        df.select(*section.columns).write_csv(path)
+        written.append(path)
+    return written
+
+
+def _simulate_section_accounting(
+    total_generation: np.ndarray,
+    total_consumption: np.ndarray,
+    wind: np.ndarray,
+    solar: np.ndarray,
+    config: BatteryConfig,
+) -> dict[str, np.ndarray]:
+    row_count = total_generation.shape[0]
+    cum_wind = np.cumsum(wind, dtype=np.float64)
+    cum_solar = np.cumsum(solar, dtype=np.float64)
+    cum_total = np.cumsum(total_generation, dtype=np.float64)
+
+    current_cycle = np.zeros(row_count, dtype=np.float64)
+    cumulative_degradation = np.zeros(row_count, dtype=np.float64)
+    capacity_now_kwh = np.zeros(row_count, dtype=np.float64)
+    excess_power_kw = np.zeros(row_count, dtype=np.float64)
+    deficit_power_kw = np.zeros(row_count, dtype=np.float64)
+    battery_opening_kw_min = np.zeros(row_count, dtype=np.float64)
+    battery_closing_kw_min = np.zeros(row_count, dtype=np.float64)
+    battery_draw_required_kw = np.zeros(row_count, dtype=np.float64)
+    battery_draw_c_rate = np.zeros(row_count, dtype=np.float64)
+    battery_draw_loss_rate = np.zeros(row_count, dtype=np.float64)
+    battery_draw_loss_kw = np.zeros(row_count, dtype=np.float64)
+    battery_draw_final_kw = np.zeros(row_count, dtype=np.float64)
+    battery_draw_cumulative_kw_min = np.zeros(row_count, dtype=np.float64)
+    grid_buy_kw = np.zeros(row_count, dtype=np.float64)
+    battery_store_available_kw = np.zeros(row_count, dtype=np.float64)
+    battery_store_c_rate = np.zeros(row_count, dtype=np.float64)
+    battery_store_loss_rate = np.zeros(row_count, dtype=np.float64)
+    battery_store_loss_kw = np.zeros(row_count, dtype=np.float64)
+    battery_store_final_kw = np.zeros(row_count, dtype=np.float64)
+    battery_store_cumulative_kw_min = np.zeros(row_count, dtype=np.float64)
+    grid_sell_kw = np.zeros(row_count, dtype=np.float64)
+    soc_kw_min = np.zeros(row_count, dtype=np.float64)
+    soc_fraction = np.zeros(row_count, dtype=np.float64)
+    soc_pct = np.zeros(row_count, dtype=np.float64)
+    discharge_cycle_count = np.zeros(row_count, dtype=np.float64)
+    charge_cycle_count = np.zeros(row_count, dtype=np.float64)
+    cum_charge_count = np.zeros(row_count, dtype=np.float64)
+    energy_sources_kw = np.zeros(row_count, dtype=np.float64)
+    energy_uses_kw = np.zeros(row_count, dtype=np.float64)
+    energy_losses_kw = np.zeros(row_count, dtype=np.float64)
+    identity_1_error_kw = np.zeros(row_count, dtype=np.float64)
+    identity_1_ok = np.zeros(row_count, dtype=np.int8)
+    bess_start_kw_min = np.zeros(row_count, dtype=np.float64)
+    bess_discharge_kw = np.zeros(row_count, dtype=np.float64)
+    bess_discharge_loss_kw = np.zeros(row_count, dtype=np.float64)
+    bess_charge_kw = np.zeros(row_count, dtype=np.float64)
+    bess_charge_loss_kw = np.zeros(row_count, dtype=np.float64)
+    bess_finish_kw_min = np.zeros(row_count, dtype=np.float64)
+    identity_2_ok = np.zeros(row_count, dtype=np.int8)
+
+    nominal_capacity_kwh = float(config.capacity_kwh)
+    prior_closing = max(config.initial_soc_fraction, 0.0) * nominal_capacity_kwh * 60.0
+    cumulative_drawn = 0.0
+    cumulative_stored = 0.0
+    prior_charge_count = 0.0
+
+    for index in range(row_count):
+        current_cycle[index] = prior_charge_count
+        cumulative_degradation[index] = prior_charge_count * config.degradation_per_cycle
+        capacity_now_kwh[index] = max(nominal_capacity_kwh * (1.0 - cumulative_degradation[index]), 0.0)
+        capacity_now_kw_min = capacity_now_kwh[index] * 60.0
+
+        battery_opening_kw_min[index] = min(max(prior_closing, 0.0), capacity_now_kw_min)
+        excess = max(float(total_generation[index]) - float(total_consumption[index]), 0.0)
+        deficit = max(float(total_consumption[index]) - float(total_generation[index]), 0.0)
+        excess_power_kw[index] = excess
+        deficit_power_kw[index] = deficit
+
+        required_draw = min(battery_opening_kw_min[index], deficit)
+        battery_draw_required_kw[index] = required_draw
+        battery_draw_c_rate[index] = _rounded_c_rate(required_draw, nominal_capacity_kwh)
+        battery_draw_loss_rate[index] = _lookup_loss_rate(battery_draw_c_rate[index], config.discharge_loss_table)
+        battery_draw_loss_kw[index] = battery_draw_loss_rate[index] * required_draw
+        battery_draw_final_kw[index] = required_draw + battery_draw_loss_kw[index] if battery_opening_kw_min[index] > deficit else required_draw
+        cumulative_drawn += battery_draw_final_kw[index]
+        battery_draw_cumulative_kw_min[index] = cumulative_drawn
+
+        store_available = 0.0
+        remaining_headroom_kw_min = max(capacity_now_kw_min - battery_opening_kw_min[index], 0.0)
+        if excess > 0.0 and remaining_headroom_kw_min > 0.0:
+            store_available = min(excess, remaining_headroom_kw_min)
+        battery_store_available_kw[index] = store_available
+        battery_store_c_rate[index] = _rounded_c_rate(store_available, nominal_capacity_kwh)
+        battery_store_loss_rate[index] = _lookup_loss_rate(battery_store_c_rate[index], config.charge_loss_table)
+        battery_store_loss_kw[index] = battery_store_loss_rate[index] * store_available
+        battery_store_final_kw[index] = min(
+            max(store_available - battery_store_loss_kw[index], 0.0),
+            remaining_headroom_kw_min,
+        )
+        cumulative_stored += battery_store_final_kw[index]
+        battery_store_cumulative_kw_min[index] = cumulative_stored
+
+        grid_buy_kw[index] = max(deficit - battery_draw_final_kw[index], 0.0)
+        grid_sell_kw[index] = max(excess - store_available, 0.0)
+
+        battery_closing_kw_min[index] = max(
+            min(
+                battery_opening_kw_min[index] - battery_draw_final_kw[index] + battery_store_final_kw[index],
+                capacity_now_kw_min,
+            ),
+            0.0,
+        )
+        soc_kw_min[index] = battery_closing_kw_min[index]
+        if nominal_capacity_kwh > 0:
+            soc_fraction[index] = soc_kw_min[index] / nominal_capacity_kwh / 60.0
+            discharge_cycle_count[index] = cumulative_drawn / nominal_capacity_kwh / 60.0
+            charge_cycle_count[index] = cumulative_stored / nominal_capacity_kwh / 60.0
+        soc_pct[index] = soc_fraction[index] * 100.0
+        cum_charge_count[index] = discharge_cycle_count[index] + charge_cycle_count[index]
+
+        energy_sources_kw[index] = total_generation[index] + battery_draw_final_kw[index] + grid_buy_kw[index]
+        energy_uses_kw[index] = total_consumption[index] + battery_store_final_kw[index] + grid_sell_kw[index]
+        energy_losses_kw[index] = (battery_draw_final_kw[index] - required_draw) + battery_store_loss_kw[index]
+        identity_1_error_kw[index] = energy_sources_kw[index] - energy_uses_kw[index] - energy_losses_kw[index]
+        identity_1_ok[index] = int(abs(identity_1_error_kw[index]) <= IDENTITY_TOLERANCE)
+
+        bess_start_kw_min[index] = battery_opening_kw_min[index]
+        bess_discharge_kw[index] = required_draw
+        bess_discharge_loss_kw[index] = battery_draw_final_kw[index] - required_draw
+        bess_charge_kw[index] = store_available
+        bess_charge_loss_kw[index] = store_available - battery_store_final_kw[index]
+        bess_finish_kw_min[index] = (
+            bess_start_kw_min[index]
+            - bess_discharge_kw[index]
+            - bess_discharge_loss_kw[index]
+            + bess_charge_kw[index]
+            - bess_charge_loss_kw[index]
+        )
+        identity_2_ok[index] = int(abs(max(bess_finish_kw_min[index], 0.0) - battery_closing_kw_min[index]) <= IDENTITY_TOLERANCE)
+
+        prior_closing = battery_closing_kw_min[index]
+        prior_charge_count = cum_charge_count[index]
+
+    return {
+        "cum_wind": cum_wind,
+        "cum_solar": cum_solar,
+        "cum_total": cum_total,
+        "current_cycle": current_cycle,
+        "cumulative_degradation": cumulative_degradation,
+        "capacity_now_kwh": capacity_now_kwh,
+        "excess_power_kw": excess_power_kw,
+        "deficit_power_kw": deficit_power_kw,
+        "battery_opening_kw_min": battery_opening_kw_min,
+        "battery_closing_kw_min": battery_closing_kw_min,
+        "battery_draw_required_kw": battery_draw_required_kw,
+        "battery_draw_c_rate": battery_draw_c_rate,
+        "battery_draw_loss_rate": battery_draw_loss_rate,
+        "battery_draw_loss_kw": battery_draw_loss_kw,
+        "battery_draw_final_kw": battery_draw_final_kw,
+        "battery_draw_cumulative_kw_min": battery_draw_cumulative_kw_min,
+        "grid_buy_kw": grid_buy_kw,
+        "battery_store_available_kw": battery_store_available_kw,
+        "battery_store_c_rate": battery_store_c_rate,
+        "battery_store_loss_rate": battery_store_loss_rate,
+        "battery_store_loss_kw": battery_store_loss_kw,
+        "battery_store_final_kw": battery_store_final_kw,
+        "battery_store_cumulative_kw_min": battery_store_cumulative_kw_min,
+        "grid_sell_kw": grid_sell_kw,
+        "soc_kw_min": soc_kw_min,
+        "soc_fraction": soc_fraction,
+        "soc_pct": soc_pct,
+        "discharge_cycle_count": discharge_cycle_count,
+        "charge_cycle_count": charge_cycle_count,
+        "cum_charge_count": cum_charge_count,
+        "energy_sources_kw": energy_sources_kw,
+        "energy_uses_kw": energy_uses_kw,
+        "energy_losses_kw": energy_losses_kw,
+        "identity_1_error_kw": identity_1_error_kw,
+        "identity_1_ok": identity_1_ok,
+        "bess_start_kw_min": bess_start_kw_min,
+        "bess_discharge_kw": bess_discharge_kw,
+        "bess_discharge_loss_kw": bess_discharge_loss_kw,
+        "bess_charge_kw": bess_charge_kw,
+        "bess_charge_loss_kw": bess_charge_loss_kw,
+        "bess_finish_kw_min": bess_finish_kw_min,
+        "identity_2_ok": identity_2_ok,
+    }
+
+
+def _rounded_c_rate(power_kw: float, nominal_capacity_kwh: float) -> float:
+    if nominal_capacity_kwh <= 0 or power_kw <= 0:
+        return 0.0
+    return round(power_kw / nominal_capacity_kwh, 1)
+
+
+def _lookup_loss_rate(c_rate: float, loss_table: dict[float, float]) -> float:
+    if c_rate <= 0:
+        return 0.0
+    eligible = [key for key in loss_table if key <= c_rate]
+    if not eligible:
+        return float(loss_table[min(loss_table)])
+    return float(loss_table[max(eligible)])

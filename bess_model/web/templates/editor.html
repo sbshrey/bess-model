@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ file_name }}{% endblock %}
+{% block content %}
+<main class="editor-page">
+  <section class="panel content-panel">
+    <div class="panel-header">
+      <div>
+        <h2>Edit CSV</h2>
+        <p class="section-subtitle">{{ relative_path }}</p>
+      </div>
+      <div class="button-row">
+        <a class="button button-ghost" href="{{ url_for('dashboard', file=relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Back to Dashboard</a>
+        <a class="button button-ghost" href="{{ url_for('download_file', relative_path=relative_path) }}">Download CSV</a>
+      </div>
+    </div>
+    {% if date_filter and date_filter.enabled %}
+      <form method="get" action="{{ url_for('edit_csv', relative_path=relative_path) }}" class="range-form">
+        <input type="hidden" name="page_size" value="{{ csv_page.page_size }}">
+        <label>
+          <span>Start</span>
+          <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
+        </label>
+        <label>
+          <span>End</span>
+          <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
+        </label>
+        <button type="submit" class="button button-ghost button-small">Apply</button>
+        <a class="button button-ghost button-small" href="{{ url_for('edit_csv', relative_path=relative_path, page_size=csv_page.page_size) }}">Clear</a>
+      </form>
+      <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows from {{ date_filter.start_date }} to {{ date_filter.end_date }}.</p>
+    {% endif %}
+
+    {% if chart_cards %}
+      <div class="chart-grid compact-chart-grid editor-chart-grid">
+          {% for chart in chart_cards %}
+            <article class="chart-card">
+              <div class="chart-card-head">
+                <div>
+                  <h3>{{ chart.title }}</h3>
+                  <p>{{ chart.subtitle }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="button button-ghost button-small"
+                  data-chart-open
+                  data-chart-title="{{ chart.title }}"
+                  data-chart-subtitle="{{ chart.subtitle }}"
+                >
+                  Expand
+                </button>
+              </div>
+              <div class="chart-wrap">{{ chart.svg|safe }}</div>
+            </article>
+          {% endfor %}
+        </div>
+    {% elif chart_svg %}
+      <div class="chart-wrap">{{ chart_svg|safe }}</div>
+    {% endif %}
+  </section>
+
+  <section class="panel content-panel editor-table-panel">
+    <form method="post" class="editor-form-shell">
+      <input type="hidden" name="page" value="{{ csv_page.page }}">
+      <input type="hidden" name="page_size" value="{{ csv_page.page_size }}">
+      <input type="hidden" name="start_date" value="{{ date_filter.start_date if date_filter else '' }}">
+      <input type="hidden" name="end_date" value="{{ date_filter.end_date if date_filter else '' }}">
+      <div class="editor-toolbar">
+        <label class="checkbox-row">
+          <input type="checkbox" name="recalculate" value="1">
+          Recalculate downstream outputs after save
+        </label>
+        <button type="submit" class="button">Save Page</button>
+      </div>
+      <div class="table-shell is-editor-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Row</th>
+              {% for column in csv_page.columns %}
+                <th>{{ column }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in csv_page.rows %}
+              {% set row_index = csv_page.row_numbers[loop.index0] %}
+              <tr>
+                <td>{{ row_index }}</td>
+                {% for column in csv_page.columns %}
+                  <td>
+                    <input
+                      type="text"
+                      name="cell__{{ row_index }}__{{ column }}"
+                      value="{{ row[column] }}"
+                      class="cell-input"
+                    >
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination sticky-pagination">
+        {% if csv_page.page > 1 %}
+          <a class="button button-ghost" href="{{ url_for('edit_csv', relative_path=relative_path, page=csv_page.page - 1, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
+        {% endif %}
+        <span>Page {{ csv_page.page }} / {{ csv_page.total_pages }} · {{ csv_page.total_rows }} rows</span>
+        {% if csv_page.page < csv_page.total_pages %}
+          <a class="button button-ghost" href="{{ url_for('edit_csv', relative_path=relative_path, page=csv_page.page + 1, page_size=csv_page.page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Next</a>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+</main>
+{% endblock %}

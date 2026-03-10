@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.Python
+env/
+venv/
+lib/
+lib64/
+# Packages
+*.egg
+*.egg-info
+dist/
+build/
+# Testing
+.pytest_cache/
+# Flask
+.env
+.flaskenv
+instance/
+# OS generated files
+.DS_Store
+.directory
+
+# Output files
+output/
+
+
+.venv/

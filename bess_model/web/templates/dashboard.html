@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}BESS Control Room{% endblock %}
+{% block content %}
+<main class="app-layout dashboard-layout">
+  <aside class="sidebar dashboard-sidebar" data-dashboard-sidebar>
+    <section class="panel sidebar-panel sidebar-controls-panel">
+      <div class="panel-header panel-header-stack">
+        <div class="sidebar-card-head">
+          <div>
+            <h2>Workspace</h2>
+            <p>{{ plant_name }}</p>
+          </div>
+          <button
+            type="button"
+            class="button button-ghost button-small"
+            data-sidebar-toggle
+            aria-expanded="true"
+          >
+            Collapse
+          </button>
+        </div>
+      </div>
+      <div class="meta-list">
+        <div>
+          <span class="meta-label">Config</span>
+          <span class="meta-value">{{ config_path }}</span>
+        </div>
+        <div>
+          <span class="meta-label">Output Dir</span>
+          <span class="meta-value">{{ output_dir }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel sidebar-panel sidebar-controls-panel">
+      <div class="panel-header panel-header-stack">
+        <h2>Controls</h2>
+        <p>Edit YAML and run from here</p>
+      </div>
+      <form method="post" action="{{ url_for('save_config') }}" class="stacked-form">
+        <textarea name="config_text" class="yaml-editor" spellcheck="false">{{ config_text }}</textarea>
+        <div class="button-stack">
+          <button type="submit" class="button button-secondary">Save Config</button>
+          <button type="submit" formaction="{{ url_for('run_simulation') }}" class="button">Run Simulation</button>
+          <button type="submit" formaction="{{ url_for('run_size') }}" class="button button-secondary">Run Sizing</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel sidebar-panel sidebar-outputs-panel">
+      <div class="panel-header panel-header-stack">
+        <h2>Outputs</h2>
+        <p>{{ outputs|length }} files</p>
+      </div>
+      <div class="output-scroll">
+        <div class="file-list">
+          {% for item in outputs %}
+            <article class="file-card {% if selected_file == item.relative_path %}is-active{% endif %}">
+              <div class="file-copy">
+                <a href="{{ url_for('dashboard', file=item.relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}" class="file-name">{{ item.name }}</a>
+                <p>{{ item.relative_path }}</p>
+                <p>{{ '%.1f'|format(item.size_kb) }} KB · {{ item.modified_at }}</p>
+              </div>
+              <div class="file-actions">
+                <a class="button button-ghost" href="{{ url_for('download_file', relative_path=item.relative_path) }}">Download</a>
+                {% if item.name.endswith('.csv') %}
+                  <a class="button button-ghost" href="{{ url_for('edit_csv', relative_path=item.relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Edit</a>
+                {% endif %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <section class="content dashboard-content">
+    <section class="dashboard-expand-toolbar">
+      <button
+        type="button"
+        class="button button-ghost"
+        data-sidebar-toggle
+        aria-expanded="true"
+      >
+        Expand Sidebar
+      </button>
+    </section>
+
+    <section class="metric-grid">
+      {% for metric in metric_cards %}
+        <article class="metric-card">
+          <p class="metric-title">{{ metric.title }}</p>
+          <h3 class="metric-value">{{ metric.value }}</h3>
+          <p class="metric-subtitle">{{ metric.subtitle }}</p>
+        </article>
+      {% endfor %}
+    </section>
+
+    <section class="panel content-panel dashboard-chart-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Charts</h2>
+          <p class="section-subtitle">{{ selected_file or "Select a CSV output" }}</p>
+        </div>
+        {% if date_filter and date_filter.enabled %}
+          <form method="get" action="{{ url_for('dashboard') }}" class="range-form">
+            <input type="hidden" name="file" value="{{ selected_file or '' }}">
+            <label>
+              <span>Start</span>
+              <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
+            </label>
+            <label>
+              <span>End</span>
+              <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
+            </label>
+            <button type="submit" class="button button-ghost button-small">Apply</button>
+            <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}">Clear</a>
+          </form>
+        {% endif %}
+      </div>
+      {% if date_filter and date_filter.enabled %}
+        <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows from {{ date_filter.start_date }} to {{ date_filter.end_date }}.</p>
+      {% endif %}
+      {% if chart_cards %}
+        <div class="chart-grid dashboard-chart-grid">
+          {% for chart in chart_cards %}
+            <article class="chart-card">
+              <div class="chart-card-head">
+                <div>
+                  <h3>{{ chart.title }}</h3>
+                  <p>{{ chart.subtitle }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="button button-ghost button-small"
+                  data-chart-open
+                  data-chart-title="{{ chart.title }}"
+                  data-chart-subtitle="{{ chart.subtitle }}"
+                >
+                  Expand
+                </button>
+              </div>
+              <div class="chart-wrap">{{ chart.svg|safe }}</div>
+            </article>
+          {% endfor %}
+        </div>
+      {% elif chart_svg %}
+        <div class="chart-wrap">{{ chart_svg|safe }}</div>
+      {% else %}
+        <p class="empty-state">No chartable CSV selected yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel content-panel dashboard-table-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Data Preview</h2>
+          <p class="section-subtitle">First {{ preview_rows|length }} rows in the current date window</p>
+        </div>
+      </div>
+      {% if preview_rows %}
+        <div class="table-shell dashboard-table-shell">
+          <table>
+            <thead>
+              <tr>
+                {% for column in preview_columns %}
+                  <th>{{ column }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in preview_rows %}
+                <tr>
+                  {% for column in preview_columns %}
+                    <td>{{ row[column] }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">Run a simulation or choose an output CSV to inspect.</p>
+      {% endif %}
+    </section>
+  </section>
+</main>
+{% endblock %}
