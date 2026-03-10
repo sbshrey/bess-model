@@ -1,8 +1,8 @@
 plant_name: solar_wind_plant
 output_dir: output
 data:
-  solar_path: /Users/shreybaheti/Documents/GitHub/bess-model/data/Solar_2025-01-01_data_.csv
-  wind_path: /Users/shreybaheti/Documents/GitHub/bess-model/data/Wind_2025_01-01_data_.csv
+  solar_path: data/Solar_2025-01-01_data_.csv
+  wind_path: data/Wind_2025_01-01_data_.csv
 preprocessing:
   frequency: 1m
   gap_fill: linear_interpolate
