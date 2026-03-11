@@ -140,3 +140,24 @@ def _section_config(
 def _aligned_inputs(config: SimulationConfig) -> tuple[pl.DataFrame, SimulationContext]:
     from bess_model.core.pipeline import load_aligned_inputs
     return load_aligned_inputs(config)
+
+def test_lookup_loss_rate_interpolation() -> None:
+    from bess_model.flows.section_outputs import _lookup_loss_rate
+    
+    loss_table = {
+        0.2: 0.04,
+        0.3: 0.045,
+        0.5: 0.07,
+        1.0: 0.11,
+        1.2: 0.14
+    }
+    
+    # Below min bounds
+    assert _lookup_loss_rate(0.1, loss_table) == 0.04
+    # Exact match
+    assert _lookup_loss_rate(0.3, loss_table) == 0.045
+    # Interpolation exactly halfway
+    # Between 0.3 (0.045) and 0.5 (0.07): 0.4 should be 0.045 + 0.5 * (0.07 - 0.045) = 0.045 + 0.0125 = 0.0575
+    assert _lookup_loss_rate(0.4, loss_table) == pytest.approx(0.0575)
+    # Above max bounds
+    assert _lookup_loss_rate(1.5, loss_table) == 0.14

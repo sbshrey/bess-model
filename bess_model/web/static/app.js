@@ -188,7 +188,56 @@
     });
   };
 
+  const initializeSidebarResizer = () => {
+    const resizer = document.querySelector(".sidebar-resizer");
+    const sidebar = document.querySelector(".sidebar");
+    const layout = document.querySelector(".dashboard-layout");
+    
+    if (!resizer || !sidebar || !layout) return;
+
+    let isResizing = false;
+    
+    // Load previously saved width
+    const savedWidth = localStorage.getItem("bess-dashboard-sidebar-width");
+    if (savedWidth) {
+      layout.style.setProperty("--sidebar-width", `${savedWidth}px`);
+    }
+
+    resizer.addEventListener("mousedown", (e) => {
+      isResizing = true;
+      resizer.classList.add("is-resizing");
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isResizing) return;
+      const layoutRect = layout.getBoundingClientRect();
+      let newWidth = e.clientX - layoutRect.left;
+      
+      // Enforce min/max widths
+      if (newWidth < 250) newWidth = 250;
+      if (newWidth > Math.min(800, window.innerWidth * 0.4)) newWidth = Math.min(800, window.innerWidth * 0.4);
+
+      layout.style.setProperty("--sidebar-width", `${newWidth}px`);
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isResizing) {
+        isResizing = false;
+        resizer.classList.remove("is-resizing");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        const currentWidth = layout.style.getPropertyValue("--sidebar-width").replace("px", "");
+        if (currentWidth) {
+          localStorage.setItem("bess-dashboard-sidebar-width", currentWidth);
+        }
+      }
+    });
+  };
+
   initializeSidebarToggle();
+  initializeSidebarResizer();
   initializeChartModal();
   initializeProgressBar();
 })();

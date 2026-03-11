@@ -24,7 +24,9 @@ from bess_model.web.services import (
     recalculate_from_edited_output,
     resolve_output_file,
     run_simulation_from_frontend,
+    run_simulation_from_form_frontend,
     save_config_text,
+    save_config_form,
     save_csv_page_edits,
 )
 
@@ -110,6 +112,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
 
         return render_template(
             "dashboard.html",
+            config=config,
             config_path=str(config_file),
             config_text=config_text,
             outputs=outputs,
@@ -133,8 +136,18 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         config_file = Path(app.config["CONFIG_PATH"])
         try:
             save_config_text(config_file, request.form["config_text"])
-            flash("Configuration saved.", "success")
+            flash("Configuration saved from YAML editor.", "success")
         except Exception as exc:  # pragma: no cover - surfaced in UI only.
+            flash(f"Failed to save config: {exc}", "error")
+        return redirect(url_for("dashboard"))
+
+    @app.post("/config/save-form")
+    def save_config_form_route():
+        config_file = Path(app.config["CONFIG_PATH"])
+        try:
+            save_config_form(config_file, request.form.to_dict())
+            flash("Configuration saved from visual form.", "success")
+        except Exception as exc:  # pragma: no cover
             flash(f"Failed to save config: {exc}", "error")
         return redirect(url_for("dashboard"))
 
@@ -144,6 +157,20 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         try:
             save_config_text(config_file, request.form["config_text"])
             config, result, _ = run_simulation_from_frontend(config_file)
+            flash(
+                f"Simulation completed for {config.plant_name}. "
+                f"Rows: {result.summary_metrics['rows']}.",
+                "success",
+            )
+        except Exception as exc:  # pragma: no cover - surfaced in UI only.
+            flash(f"Simulation failed: {exc}", "error")
+        return redirect(url_for("dashboard"))
+
+    @app.post("/run/simulate-form")
+    def run_simulation_form():
+        config_file = Path(app.config["CONFIG_PATH"])
+        try:
+            config, result, _ = run_simulation_from_form_frontend(config_file, request.form.to_dict())
             flash(
                 f"Simulation completed for {config.plant_name}. "
                 f"Rows: {result.summary_metrics['rows']}.",

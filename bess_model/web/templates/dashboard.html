@@ -3,6 +3,7 @@
 {% block content %}
 <main class="app-layout dashboard-layout">
   <aside class="sidebar dashboard-sidebar" data-dashboard-sidebar>
+    <div class="sidebar-resizer"></div>
     <section class="panel sidebar-panel sidebar-controls-panel">
       <div class="panel-header panel-header-stack">
         <div class="sidebar-card-head">
@@ -34,17 +35,92 @@
 
     <section class="panel sidebar-panel sidebar-controls-panel">
       <div class="panel-header panel-header-stack">
-        <h2>Controls</h2>
-        <p>Edit YAML and run from here</p>
+        <h2>Configuration</h2>
+        <p>Edit variables and run from here</p>
       </div>
-      <form method="post" action="{{ url_for('save_config') }}" class="stacked-form">
-        <textarea name="config_text" class="yaml-editor" spellcheck="false">{{ config_text }}</textarea>
-        <div class="button-stack">
-          <button type="submit" class="button button-secondary">Save Config</button>
-          <button type="submit" formaction="{{ url_for('run_simulation') }}" class="button">Run Simulation</button>
+      
+      <div class="tabs-wrapper" style="margin-bottom: 1rem;">
+        <div class="tabs-header" style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+          <button type="button" class="tab-btn active" data-tab-target="#tab-visual" style="background:none; border:none; cursor:pointer; font-weight:600; color:var(--accent);">Visual Form</button>
+          <button type="button" class="tab-btn" data-tab-target="#tab-yaml" style="background:none; border:none; cursor:pointer; font-weight:500; color:var(--text-muted);">Raw YAML</button>
         </div>
-      </form>
+
+        <div class="tab-content active" id="tab-visual" style="margin-top: 1rem;">
+          <form method="post" action="{{ url_for('save_config_form_route') }}" class="stacked-form config-visual-form">
+            <div class="form-section">
+              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-database" style="font-size: 1.1em;">⚙️</span> Basic Settings</h4>
+              <label>Plant Name <input type="text" name="plant_name" value="{{ config.plant_name }}" class="input-field"></label>
+              <label>Output Dir <input type="text" name="output_dir" value="{{ config.output_dir }}" class="input-field"></label>
+            </div>
+            
+            <div class="form-section" style="margin-top: 1rem;">
+              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-settings" style="font-size: 1.1em;">🪄</span> Preprocessing</h4>
+              <label>Data Frequency <input type="text" name="preprocessing.frequency" value="{{ config.preprocessing.frequency }}" class="input-field"></label>
+              <label>Gap Fill Strategy 
+                <select name="preprocessing.gap_fill" class="input-field">
+                  <option value="linear_interpolate" {% if config.preprocessing.gap_fill == 'linear_interpolate' %}selected{% endif %}>Linear Interpolation</option>
+                  <option value="zero" {% if config.preprocessing.gap_fill == 'zero' %}selected{% endif %}>Zero Fill</option>
+                </select>
+              </label>
+              <label>Max Gap Minutes <input type="number" name="preprocessing.max_interpolation_gap_minutes" value="{{ config.preprocessing.max_interpolation_gap_minutes }}" class="input-field"></label>
+            </div>
+
+            <div class="form-section" style="margin-top: 1rem;">
+              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-zap" style="font-size: 1.1em;">⚡</span> Grid & Load</h4>
+              <label>Grid Export Limit (kW) <input type="number" step="any" name="grid.export_limit_kw" value="{{ config.grid.export_limit_kw }}" class="input-field"></label>
+              <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw }}" class="input-field"></label>
+              <label>Aux Consumption (kW) <input type="number" step="any" name="load.aux_consumption_kw" value="{{ config.load.aux_consumption_kw }}" class="input-field"></label>
+            </div>
+
+            <div class="form-section" style="margin-top: 1rem;">
+              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-battery-charging" style="font-size: 1.1em;">🔋</span> Battery Specs</h4>
+              <label>Nominal Power (kW) <input type="number" step="any" name="battery.nominal_power_kw" value="{{ config.battery.nominal_power_kw }}" class="input-field"></label>
+              <label>Duration (Hours) <input type="number" step="any" name="battery.duration_hours" value="{{ config.battery.duration_hours }}" class="input-field"></label>
+              <label>Initial SOC Fraction <input type="number" step="any" name="battery.initial_soc_fraction" value="{{ config.battery.initial_soc_fraction }}" class="input-field"></label>
+              <label>Min SOC Fraction <input type="number" step="any" name="battery.min_soc_fraction" value="{{ config.battery.min_soc_fraction }}" class="input-field"></label>
+              <label>Max SOC Fraction <input type="number" step="any" name="battery.max_soc_fraction" value="{{ config.battery.max_soc_fraction }}" class="input-field"></label>
+            </div>
+
+            <div class="button-stack" style="margin-top: 1.5rem;">
+              <button type="submit" class="button button-secondary">Save Config</button>
+              <button type="submit" formaction="{{ url_for('run_simulation_form') }}" class="button">Run Simulation</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tab-content" id="tab-yaml" style="display: none; margin-top: 1rem;">
+          <form method="post" action="{{ url_for('save_config') }}" class="stacked-form">
+            <textarea name="config_text" class="yaml-editor" spellcheck="false" style="min-height: 400px;">{{ config_text }}</textarea>
+            <div class="button-stack" style="margin-top: 1rem;">
+              <button type="submit" class="button button-secondary">Save YAML</button>
+              <button type="submit" formaction="{{ url_for('run_simulation') }}" class="button">Run Simulation</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </section>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const tabs = document.querySelectorAll('.tab-btn');
+        tabs.forEach(tab => {
+          tab.addEventListener('click', () => {
+            tabs.forEach(t => {
+              t.classList.remove('active');
+              t.style.fontWeight = '500';
+              t.style.color = 'var(--text-muted)';
+            });
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            
+            tab.classList.add('active');
+            tab.style.fontWeight = '600';
+            tab.style.color = 'var(--accent)';
+            document.querySelector(tab.dataset.tabTarget).style.display = 'block';
+          });
+        });
+      });
+    </script>
+
 
 
   </aside>

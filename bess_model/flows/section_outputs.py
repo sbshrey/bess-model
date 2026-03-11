@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+import bisect
 
 import numpy as np
 import polars as pl
@@ -179,12 +180,21 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
 def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
     """Write one CSV per section."""
     target_dir.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
+    written_paths: list[Path] = []
+    
+    # Generic base columns we want visible on all exported sections
+    base_columns = ["timestamp", "wind_kw", "solar_kw", "total_generation_kw"]
+
     for section in OUTPUT_SECTIONS:
-        path = target_dir / section.file_name
-        df.select(*section.columns).write_csv(path)
-        written.append(path)
-    return written
+        # Resolve target columns ensuring we don't duplicate explicitly requested bases
+        explicit_columns = [col for col in section.columns if col not in base_columns]
+        target_columns = base_columns + explicit_columns
+        
+        subset = df.select(target_columns)
+        file_path = target_dir / section.file_name
+        subset.write_csv(file_path)
+        written_paths.append(file_path)
+    return written_paths
 
 
 def _simulate_section_accounting(
@@ -418,9 +428,30 @@ def _rounded_c_rate(power_kw: float, nominal_capacity_kwh: float) -> float:
 
 
 def _lookup_loss_rate(c_rate: float, loss_table: dict[float, float]) -> float:
-    if c_rate <= 0:
+    if not loss_table:
         return 0.0
-    eligible = [key for key in loss_table if key <= c_rate]
-    if not eligible:
-        return float(loss_table[min(loss_table)])
-    return float(loss_table[max(eligible)])
+
+    c_rate = float(c_rate)
+    sorted_keys = sorted(loss_table.keys())
+    
+    if c_rate <= sorted_keys[0]:
+        return float(loss_table[sorted_keys[0]])
+    if c_rate >= sorted_keys[-1]:
+        return float(loss_table[sorted_keys[-1]])
+        
+    idx = bisect.bisect_left(sorted_keys, c_rate)
+    
+    # We are exactly on a key
+    if sorted_keys[idx] == c_rate:
+        return float(loss_table[sorted_keys[idx]])
+        
+    # We are explicitly between two keys
+    lower_k = sorted_keys[idx - 1]
+    upper_k = sorted_keys[idx]
+    
+    lower_v = loss_table[lower_k]
+    upper_v = loss_table[upper_k]
+    
+    # linear interpolation formula: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+    fraction = (c_rate - lower_k) / (upper_k - lower_k)
+    return float(lower_v + fraction * (upper_v - lower_v))

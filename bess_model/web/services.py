@@ -98,21 +98,57 @@ def load_config_text(config_path: Path) -> str:
 
 def save_config_text(config_path: Path, text: str) -> SimulationConfig:
     """Validate and persist frontend-edited YAML config text."""
-    payload = yaml.safe_load(text)
-    if not isinstance(payload, dict):
-        raise ValueError("Configuration must be a YAML mapping.")
-    config = SimulationConfig.from_dict(payload)
+    yaml_data = yaml.safe_load(text)
+    if not isinstance(yaml_data, dict):
+        raise ValueError("Configuration must be a dictionary.")
+    # Let's write the text directly then parse it to ensure it's valid.
     config_path.write_text(text, encoding="utf-8")
-    return config
+    return SimulationConfig.from_yaml(config_path)
+
+
+def save_config_form(config_path: Path, form_data: dict[str, str]) -> SimulationConfig:
+    """Update nested YAML fields strictly from flattened form inputs."""
+    text = config_path.read_text(encoding="utf-8")
+    yaml_data = yaml.safe_load(text)
+    if not isinstance(yaml_data, dict):
+        yaml_data = {}
+        
+    for key, raw_value in form_data.items():
+        if key in ("config_text", "recalculate", "page", "page_size", "start_date", "end_date", "file"):
+            continue
+            
+        # Parse numeric strings dynamically 
+        value: Any = raw_value
+        if value.replace(".", "", 1).isdigit() and "." in value:
+            value = float(value)
+        elif value.isdigit():
+            value = int(value)
+            
+        parts = key.split(".")
+        current = yaml_data
+        for part in parts[:-1]:
+            if part not in current or not isinstance(current[part], dict):
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = value
+        
+    updated_text = yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
+    config_path.write_text(updated_text, encoding="utf-8")
+    return SimulationConfig.from_yaml(config_path)
 
 
 def run_simulation_from_frontend(config_path: Path) -> tuple[SimulationConfig, SimulationResult, list[Path]]:
-    """Run the full simulation and dump aligned/section CSVs."""
+    """Execute the simulation pipeline and construct all CSV assets."""
     config = SimulationConfig.from_yaml(config_path)
     result = simulate_system(config)
     write_simulation_outputs(result, config.output_dir, config.plant_name)
     stage_paths = _write_stage_snapshots(config)
     return config, result, stage_paths
+
+def run_simulation_from_form_frontend(config_path: Path, form_data: dict[str, str]) -> tuple[SimulationConfig, SimulationResult, list[Path]]:
+    """Save the form fields and execute the simulation pipeline."""
+    save_config_form(config_path, form_data)
+    return run_simulation_from_frontend(config_path)
 
 
 

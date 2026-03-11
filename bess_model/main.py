@@ -55,3 +55,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for key, value in result.summary_metrics.items():
         print(f"{key}: {value}")
     return 0
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

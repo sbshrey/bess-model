@@ -28,6 +28,8 @@ def align_generation_to_minute(
         .with_columns(
             pl.col("solar_kw").fill_null(0.0),
             pl.col("wind_kw").fill_null(0.0),
+            pl.col("solar_kw_raw").fill_null(0.0),
+            pl.col("wind_kw_raw").fill_null(0.0),
         )
         .with_columns((pl.col("solar_kw") + pl.col("wind_kw")).alias("total_generation_kw"))
         .sort("timestamp")
@@ -57,10 +59,15 @@ def _resample_source(frame: pl.DataFrame, value_column: str, config: Preprocessi
         joined.with_columns(
             pl.col("observed_ts").forward_fill().alias("prev_observed_ts"),
             pl.col("observed_ts").backward_fill().alias("next_observed_ts"),
+            pl.col(value_column).alias(f"{value_column}_raw"),
         )
         .with_columns(span_expr)
         .with_columns(
             pl.when(
+                (pl.lit(config.gap_fill) == "zero")
+            )
+            .then(None) # Force gaps to stay null, downstream fill_null(0.0) covers this
+            .when(
                 pl.col("observed")
                 | (
                     pl.col("gap_span_minutes").is_not_null()
@@ -74,7 +81,7 @@ def _resample_source(frame: pl.DataFrame, value_column: str, config: Preprocessi
         .with_columns(
             pl.col(f"{value_column}_interpolated").fill_null(0.0).alias(value_column),
         )
-        .select("timestamp", value_column)
+        .select("timestamp", value_column, f"{value_column}_raw")
     )
     return prepared
 

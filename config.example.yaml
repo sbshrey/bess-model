@@ -5,11 +5,11 @@ data:
   wind_path: data/Wind_2025_01-01_data_.csv
 preprocessing:
   frequency: 1m
-  gap_fill: linear_interpolate
+  gap_fill: zero
   max_interpolation_gap_minutes: 15
 grid:
   export_limit_kw: 400.0
-  import_limit_kw:
+  import_limit_kw: null
 load:
   output_profile_kw: 400.0
   aux_consumption_kw: 20.0
@@ -21,36 +21,16 @@ battery:
   charge_efficiency: 0.96
   discharge_efficiency: 0.94
   charge_loss_table:
-    0.0: 0.0
-    0.1: 0.04
     0.2: 0.04
     0.3: 0.045
-    0.4: 0.0575
     0.5: 0.07
-    0.6: 0.078
-    0.7: 0.086
-    0.8: 0.094
-    0.9: 0.102
     1.0: 0.11
-    1.1: 0.125
     1.2: 0.14
-    1.3: 0.14
-    1.4: 0.14
-    1.5: 0.14
   discharge_loss_table:
-    0.0: 0.0
-    0.1: 0.023
     0.2: 0.023
     0.3: 0.032
-    0.4: 0.037
     0.5: 0.042
-    0.6: 0.046
-    0.7: 0.05
-    0.8: 0.054
-    0.9: 0.058
     1.0: 0.062
-    1.1: 0.0645
     1.2: 0.067
-    1.3: 0.067
-    1.4: 0.067
-    1.5: 0.067
+  min_soc_fraction: 0.0
+  max_soc_fraction: 1.0
