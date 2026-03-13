@@ -118,9 +118,9 @@
         return;
       }
 
-      modalCanvas.innerHTML = chartWrap.innerHTML;
+      modalCanvas.innerHTML = `<div class="chart-wrap">${chartWrap.innerHTML}</div>`;
       modalTitle.textContent = button.dataset.chartTitle || "Expanded Chart";
-      modalSubtitle.textContent = button.dataset.chartSubtitle || "Inspect chart details with zoom controls.";
+      modalSubtitle.textContent = button.dataset.chartSubtitle || "Inspect chart details.";
       scale = 1;
       applyScale();
       modal.hidden = false;
@@ -132,27 +132,15 @@
       document.body.classList.remove("modal-open");
     };
 
-    document.querySelectorAll("[data-chart-open]").forEach((button) => {
-      button.addEventListener("click", () => openModal(button));
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-chart-open]");
+      if (button) {
+        openModal(button);
+      }
     });
 
     modal.querySelectorAll("[data-chart-close]").forEach((button) => {
       button.addEventListener("click", closeModal);
-    });
-
-    modal.querySelector("[data-chart-zoom-in]")?.addEventListener("click", () => {
-      scale = Math.min(3, scale + 0.2);
-      applyScale();
-    });
-
-    modal.querySelector("[data-chart-zoom-out]")?.addEventListener("click", () => {
-      scale = Math.max(0.6, scale - 0.2);
-      applyScale();
-    });
-
-    modal.querySelector("[data-chart-zoom-reset]")?.addEventListener("click", () => {
-      scale = 1;
-      applyScale();
     });
 
     document.addEventListener("keydown", (event) => {
@@ -236,8 +224,164 @@
     });
   };
 
+  const initializeInteractiveCharts = () => {
+    const panel = document.querySelector(".dashboard-chart-panel");
+    const modal = document.querySelector("[data-chart-modal]");
+    const modalCanvas = modal?.querySelector("[data-chart-modal-canvas]");
+    const modalTitleElement = modal?.querySelector("[data-chart-modal-title]");
+
+    if (!panel) return;
+
+    let isDragging = false;
+    let startX = 0;
+    let brushGroup = null;
+    let currentWrap = null;
+
+    document.addEventListener("mousedown", (e) => {
+      const wrap = e.target.closest(".chart-wrap");
+      if (!wrap || e.target.closest(".reset-zoom-btn")) return;
+      e.preventDefault();
+      isDragging = true;
+      currentWrap = wrap;
+      const rect = wrap.getBoundingClientRect();
+      startX = e.clientX - rect.left;
+
+      brushGroup = document.createElement("div");
+      brushGroup.className = "chart-brush";
+      brushGroup.style.left = `${startX}px`;
+      brushGroup.style.width = "0px";
+      wrap.appendChild(brushGroup);
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging || !brushGroup || !currentWrap) return;
+      const rect = currentWrap.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      
+      const clampedX = Math.max(0, Math.min(rect.width, currentX));
+      const width = Math.abs(clampedX - startX);
+      const left = Math.min(clampedX, startX);
+      
+      brushGroup.style.left = `${left}px`;
+      brushGroup.style.width = `${width}px`;
+    });
+
+    const fetchAndRenderCharts = async (url) => {
+       const chartGrid = panel.querySelector(".dashboard-chart-grid");
+       if (chartGrid) chartGrid.style.opacity = "0.5";
+       if (modalCanvas && !modal.hidden) modalCanvas.style.opacity = "0.5";
+       const isZoomed = url.includes("start_date=");
+       try {
+         const response = await fetch(url);
+         if (!response.ok) throw new Error("Failed to fetch zoom bounds from Backend.");
+         const cards = await response.json();
+         if (cards.error) throw new Error(cards.error);
+
+         const resetBtnHtml = isZoomed ? '<button class="reset-zoom-btn">Reset Zoom</button>' : "";
+         let newHtml = "";
+         for (const card of cards) {
+            newHtml += `
+             <article class="chart-card">
+               <div class="chart-card-head">
+                 <div>
+                   <h3>${card.title}</h3>
+                   <p>${card.subtitle}</p>
+                 </div>
+                 <button type="button" class="button button-ghost button-small" data-chart-open data-chart-title="${card.title}" data-chart-subtitle="${card.subtitle}">Expand</button>
+               </div>
+               <div class="chart-wrap">
+                  ${resetBtnHtml}
+                  ${card.svg}
+               </div>
+             </article>
+            `;
+            if (modalCanvas && !modal.hidden && modalTitleElement && modalTitleElement.textContent === card.title) {
+                modalCanvas.innerHTML = `<div class="chart-wrap">${resetBtnHtml}${card.svg}</div>`;
+            }
+         }
+         if (chartGrid) {
+             chartGrid.innerHTML = newHtml;
+             chartGrid.style.opacity = "1";
+         }
+         if (modalCanvas && !modal.hidden) {
+             modalCanvas.style.opacity = "1";
+         }
+       } catch (err) {
+         console.error(err);
+         if (chartGrid) chartGrid.style.opacity = "1";
+         if (modalCanvas && !modal.hidden) modalCanvas.style.opacity = "1";
+       }
+    };
+
+    document.addEventListener("mouseup", async (e) => {
+      if (!isDragging || !brushGroup || !currentWrap) return;
+      isDragging = false;
+      
+      const wrap = currentWrap;
+      const rect = wrap.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const clampedX = Math.max(0, Math.min(rect.width, currentX));
+      
+      const left = Math.min(clampedX, startX);
+      const right = Math.max(clampedX, startX);
+      
+      brushGroup.remove();
+      brushGroup = null;
+      currentWrap = null;
+
+      if (right - left < 10) return;
+
+      const svg = wrap.querySelector("svg");
+      if (!svg) return;
+
+      const xMin = parseFloat(svg.getAttribute("data-x-min"));
+      const xMax = parseFloat(svg.getAttribute("data-x-max"));
+      if (isNaN(xMin) || isNaN(xMax)) return;
+
+      const scaleX = 720 / rect.width;
+      const svgLeft = left * scaleX;
+      const svgRight = right * scaleX;
+
+      const leftPadding = 66;
+      const rightPadding = 18;
+      const chartWidth = 720 - leftPadding - rightPadding;
+
+      let propStart = (svgLeft - leftPadding) / chartWidth;
+      let propEnd = (svgRight - leftPadding) / chartWidth;
+      propStart = Math.max(0, Math.min(1, propStart));
+      propEnd = Math.max(0, Math.min(1, propEnd));
+      if (propStart >= propEnd) return;
+
+      const xSpan = xMax - xMin;
+      const newXMin = xMin + propStart * xSpan;
+      const newXMax = xMin + propEnd * xSpan;
+
+      const d1 = new Date(newXMin * 1000);
+      const d2 = new Date(newXMax * 1000);
+      const pad = (n) => n.toString().padStart(2, '0');
+      const s1 = `${d1.getFullYear()}-${pad(d1.getMonth()+1)}-${pad(d1.getDate())} ${pad(d1.getHours())}:${pad(d1.getMinutes())}:${pad(d1.getSeconds())}`;
+      const s2 = `${d2.getFullYear()}-${pad(d2.getMonth()+1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}:${pad(d2.getSeconds())}`;
+
+      const filePath = panel.getAttribute("data-file-path");
+      if (!filePath) return;
+
+      const url = `/api/render-charts/${encodeURIComponent(filePath)}?start_date=${encodeURIComponent(s1)}&end_date=${encodeURIComponent(s2)}`;
+      await fetchAndRenderCharts(url);
+    });
+    
+    document.addEventListener("click", async (e) => {
+       if (e.target.closest(".reset-zoom-btn")) {
+          const filePath = panel.getAttribute("data-file-path");
+          if (!filePath) return;
+          const url = `/api/render-charts/${encodeURIComponent(filePath)}`;
+          await fetchAndRenderCharts(url);
+       }
+    });
+  };
+
   initializeSidebarToggle();
   initializeSidebarResizer();
   initializeChartModal();
   initializeProgressBar();
+  initializeInteractiveCharts();
 })();

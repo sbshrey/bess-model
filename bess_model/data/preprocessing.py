@@ -63,16 +63,15 @@ def _resample_source(frame: pl.DataFrame, value_column: str, config: Preprocessi
         )
         .with_columns(span_expr)
         .with_columns(
-            pl.when(
+            pl.when(pl.col("observed"))
+            .then(pl.col(value_column))
+            .when(
                 (pl.lit(config.gap_fill) == "zero")
             )
             .then(None) # Force gaps to stay null, downstream fill_null(0.0) covers this
             .when(
-                pl.col("observed")
-                | (
-                    pl.col("gap_span_minutes").is_not_null()
-                    & (pl.col("gap_span_minutes") <= config.max_interpolation_gap_minutes + 1)
-                )
+                (pl.col("gap_span_minutes").is_not_null())
+                & (pl.col("gap_span_minutes") <= config.max_interpolation_gap_minutes + 1)
             )
             .then(pl.col(value_column).interpolate())
             .otherwise(None)

@@ -9,7 +9,7 @@ preprocessing:
   max_interpolation_gap_minutes: 15
 grid:
   export_limit_kw: 400.0
-  import_limit_kw: null
+  import_limit_kw: ''
 load:
   output_profile_kw: 400.0
   aux_consumption_kw: 20.0

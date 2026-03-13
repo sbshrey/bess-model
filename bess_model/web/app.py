@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 import math
 
-from flask import Flask, flash, redirect, render_template, request, send_file, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for
 
 from bess_model.config import SimulationConfig
 from bess_model.web.services import (
@@ -243,6 +243,31 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             chart_cards=chart_cards,
             date_filter=filtered_csv.date_filter,
         )
+
+    @app.get("/api/render-charts/<path:relative_path>")
+    def api_render_charts(relative_path: str):
+        config = SimulationConfig.from_yaml(app.config["CONFIG_PATH"])
+        try:
+            path = resolve_output_file(config, relative_path)
+        except (FileNotFoundError, ValueError):
+            return jsonify({"error": "File not found"}), 404
+
+        start_date = normalize_date_input(request.args.get("start_date"))
+        end_date = normalize_date_input(request.args.get("end_date"))
+
+        try:
+            filtered_csv = load_filtered_csv(path, start_date=start_date, end_date=end_date)
+            chart_cards = build_chart_cards(df=filtered_csv.df)
+            return jsonify([
+                {
+                    "title": chart.title,
+                    "subtitle": chart.subtitle,
+                    "svg": chart.svg
+                }
+                for chart in chart_cards
+            ])
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     return app
 

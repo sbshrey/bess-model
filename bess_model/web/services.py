@@ -113,17 +113,33 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
     if not isinstance(yaml_data, dict):
         yaml_data = {}
         
+    # Keys whose values must be parsed as YAML (e.g. dict/mapping fields)
+    table_keys = {"battery.charge_loss_table", "battery.discharge_loss_table"}
+
     for key, raw_value in form_data.items():
         if key in ("config_text", "recalculate", "page", "page_size", "start_date", "end_date", "file"):
             continue
-            
-        # Parse numeric strings dynamically 
+
         value: Any = raw_value
-        if value.replace(".", "", 1).isdigit() and "." in value:
-            value = float(value)
-        elif value.isdigit():
-            value = int(value)
-            
+
+        if key in table_keys:
+            # Parse loss table text (C-rate: loss per line) as YAML dict
+            text = (raw_value or "").strip()
+            if text:
+                try:
+                    parsed = yaml.safe_load(text)
+                    value = {float(k): float(v) for k, v in (parsed.items() if isinstance(parsed, dict) else [])}
+                except (yaml.YAMLError, TypeError, ValueError):
+                    value = {}
+            else:
+                value = {}
+        else:
+            # Parse numeric strings dynamically
+            if value.replace(".", "", 1).isdigit() and "." in value:
+                value = float(value)
+            elif value.isdigit():
+                value = int(value)
+
         parts = key.split(".")
         current = yaml_data
         for part in parts[:-1]:
@@ -532,7 +548,10 @@ def build_chart_svg_from_df(
     x_axis_label = _infer_x_axis_label(x_column)
 
     x_values, x_tick_values, x_tick_labels = _build_x_axis_scale(df, x_column)
-    original_x_values = df[x_column].to_list()
+    if x_column in df.columns:
+        original_x_values = df[x_column].to_list()
+    else:
+        original_x_values = [str(int(val)) for val in x_values]
     max_value = max(float(df.select(pl.max_horizontal([pl.col(column) for column in columns]).max()).item()), 1.0)
     colors = ["#4f46e5", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6"]
 
@@ -606,7 +625,8 @@ def build_chart_svg_from_df(
 
     return (
         f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
-        f'class="chart-svg" role="img" aria-label="Flow chart">'
+        f'class="chart-svg" role="img" aria-label="Flow chart" '
+        f'data-x-min="{x_min}" data-x-max="{x_max}">'
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="#ffffff" rx="12" />'
         f'<line x1="{left_padding}" y1="{height - bottom_padding}" x2="{width - right_padding}" y2="{height - bottom_padding}" '
         f'stroke="#cbd5e1" stroke-width="1.5" />'
@@ -765,7 +785,13 @@ def normalize_date_input(value: str | None) -> str:
     """Normalize a query/form date string to ISO format."""
     if not value:
         return ""
-    return date.fromisoformat(value).isoformat()
+    value = value.strip()
+    try:
+        if " " in value or "T" in value:
+             return datetime.fromisoformat(value.replace(" ", "T")).isoformat(sep=" ")
+        return date.fromisoformat(value[:10]).isoformat()
+    except ValueError:
+        return ""
 
 
 def _write_stage_snapshots(config: SimulationConfig) -> list[Path]:
@@ -811,10 +837,16 @@ def _filter_df_by_date(df: pl.DataFrame, start_date: str | None, end_date: str |
 
     filtered = df
     if normalized_start:
-        start_dt = datetime.combine(date.fromisoformat(normalized_start), time.min)
+        if " " in normalized_start:
+            start_dt = datetime.fromisoformat(normalized_start.replace(" ", "T"))
+        else:
+            start_dt = datetime.combine(date.fromisoformat(normalized_start), time.min)
         filtered = filtered.filter(pl.col(timestamp_column) >= pl.lit(start_dt))
     if normalized_end:
-        end_dt = datetime.combine(date.fromisoformat(normalized_end) + timedelta(days=1), time.min)
+        if " " in normalized_end:
+            end_dt = datetime.fromisoformat(normalized_end.replace(" ", "T"))
+        else:
+            end_dt = datetime.combine(date.fromisoformat(normalized_end) + timedelta(days=1), time.min)
         filtered = filtered.filter(pl.col(timestamp_column) < pl.lit(end_dt))
     return filtered
 
@@ -861,6 +893,13 @@ def _build_date_filter_state(
 
 def _format_cell_value(val: Any) -> Any:
     """Format a cell value for display, applying reasonable float rounding."""
+    if isinstance(val, str):
+        try:
+            if len(val) >= 19 and val[4] == '-' and val[7] == '-' and val[13] == ':':
+                dt = datetime.fromisoformat(val.replace(" ", "T"))
+                return dt.strftime("%d %b %Y %H:%M:%S")
+        except ValueError:
+            pass
     if hasattr(val, "isoformat"):
         return val.isoformat(sep=" ")
     
@@ -892,17 +931,29 @@ def _build_row_date_predicate(
     if not timestamp_column or (not normalized_start and not normalized_end):
         return None
 
-    start_bound = date.fromisoformat(normalized_start) if normalized_start else None
-    end_bound = date.fromisoformat(normalized_end) if normalized_end else None
+    if normalized_start:
+        if " " in normalized_start:
+            start_bound = datetime.fromisoformat(normalized_start.replace(" ", "T"))
+        else:
+            start_bound = datetime.combine(date.fromisoformat(normalized_start), time.min)
+    else:
+        start_bound = None
+
+    if normalized_end:
+        if " " in normalized_end:
+            end_bound = datetime.fromisoformat(normalized_end.replace(" ", "T"))
+        else:
+            end_bound = datetime.combine(date.fromisoformat(normalized_end) + timedelta(days=1), time.min)
+    else:
+        end_bound = None
 
     def predicate(row: dict[str, str]) -> bool:
         timestamp_value = _parse_timestamp_text(row.get(timestamp_column, ""))
         if timestamp_value is None:
             return False
-        row_date = timestamp_value.date()
-        if start_bound and row_date < start_bound:
+        if start_bound and timestamp_value < start_bound:
             return False
-        if end_bound and row_date > end_bound:
+        if end_bound and timestamp_value >= end_bound:
             return False
         return True
 

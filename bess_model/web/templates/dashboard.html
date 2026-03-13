@@ -54,6 +54,12 @@
             </div>
             
             <div class="form-section" style="margin-top: 1rem;">
+              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-folder" style="font-size: 1.1em;">📁</span> Data Source Paths</h4>
+              <label>Solar CSV Path <input type="text" name="data.solar_path" value="{{ config.data.solar_path }}" class="input-field"></label>
+              <label>Wind CSV Path <input type="text" name="data.wind_path" value="{{ config.data.wind_path }}" class="input-field"></label>
+            </div>
+            
+            <div class="form-section" style="margin-top: 1rem;">
               <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-settings" style="font-size: 1.1em;">🪄</span> Preprocessing</h4>
               <label>Data Frequency <input type="text" name="preprocessing.frequency" value="{{ config.preprocessing.frequency }}" class="input-field"></label>
               <label>Gap Fill Strategy 
@@ -68,6 +74,7 @@
             <div class="form-section" style="margin-top: 1rem;">
               <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-zap" style="font-size: 1.1em;">⚡</span> Grid & Load</h4>
               <label>Grid Export Limit (kW) <input type="number" step="any" name="grid.export_limit_kw" value="{{ config.grid.export_limit_kw }}" class="input-field"></label>
+              <label>Grid Import Limit (kW) <input type="number" step="any" name="grid.import_limit_kw" value="{{ config.grid.import_limit_kw if config.grid.import_limit_kw is not none else '' }}" class="input-field" placeholder="null"></label>
               <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw }}" class="input-field"></label>
               <label>Aux Consumption (kW) <input type="number" step="any" name="load.aux_consumption_kw" value="{{ config.load.aux_consumption_kw }}" class="input-field"></label>
             </div>
@@ -76,9 +83,22 @@
               <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-battery-charging" style="font-size: 1.1em;">🔋</span> Battery Specs</h4>
               <label>Nominal Power (kW) <input type="number" step="any" name="battery.nominal_power_kw" value="{{ config.battery.nominal_power_kw }}" class="input-field"></label>
               <label>Duration (Hours) <input type="number" step="any" name="battery.duration_hours" value="{{ config.battery.duration_hours }}" class="input-field"></label>
+              <label>Charge Efficiency (0-1) <input type="number" step="any" name="battery.charge_efficiency" value="{{ config.battery.charge_efficiency }}" class="input-field"></label>
+              <label>Discharge Efficiency (0-1) <input type="number" step="any" name="battery.discharge_efficiency" value="{{ config.battery.discharge_efficiency }}" class="input-field"></label>
+              <label>Degradation Per Cycle <input type="number" step="any" name="battery.degradation_per_cycle" value="{{ config.battery.degradation_per_cycle }}" class="input-field"></label>
               <label>Initial SOC Fraction <input type="number" step="any" name="battery.initial_soc_fraction" value="{{ config.battery.initial_soc_fraction }}" class="input-field"></label>
               <label>Min SOC Fraction <input type="number" step="any" name="battery.min_soc_fraction" value="{{ config.battery.min_soc_fraction }}" class="input-field"></label>
               <label>Max SOC Fraction <input type="number" step="any" name="battery.max_soc_fraction" value="{{ config.battery.max_soc_fraction }}" class="input-field"></label>
+              <label>Charge Loss Table (C-rate: loss)
+                <textarea name="battery.charge_loss_table" class="input-field" rows="4" placeholder="0.2: 0.04&#10;0.3: 0.045&#10;0.5: 0.07&#10;1.0: 0.11">{% for k, v in (config.battery.charge_loss_table.items()|sort) -%}
+{{ k }}: {{ v }}
+{% endfor -%}</textarea>
+              </label>
+              <label>Discharge Loss Table (C-rate: loss)
+                <textarea name="battery.discharge_loss_table" class="input-field" rows="4" placeholder="0.2: 0.023&#10;0.3: 0.032&#10;0.5: 0.042&#10;1.0: 0.062">{% for k, v in (config.battery.discharge_loss_table.items()|sort) -%}
+{{ k }}: {{ v }}
+{% endfor -%}</textarea>
+              </label>
             </div>
 
             <div class="button-stack" style="margin-top: 1.5rem;">
@@ -147,7 +167,7 @@
       {% endfor %}
     </section>
 
-    <section class="panel content-panel dashboard-chart-panel">
+    <section class="panel content-panel dashboard-chart-panel" data-file-path="{{ selected_file }}">
       <div class="panel-header" style="display: flex; flex-direction: column; gap: 1rem; padding-bottom: 1rem;">
         <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
           <!-- File Selection Dropdown -->
