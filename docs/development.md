@@ -39,6 +39,10 @@ gunicorn -w 4 -b 0.0.0.0:5000 wsgi:app
 
 `wsgi.py` loads the app via `create_app()`; use `BESS_CONFIG_PATH` and `PORT` env vars.
 
+### Health Check
+
+`GET /health` returns `{"status": "ok"}` and 200. Use for load balancer health checks and monitoring.
+
 ## Testing
 
 ```bash

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 import bisect
 
 import numpy as np
@@ -124,7 +124,13 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
         total_consumption = df["site_load_kw"].to_numpy()
     else:
         total_consumption = output_profile + aux_consumption
-    metrics = _simulate_section_accounting(total_generation, total_consumption, wind, solar, context.config.battery)
+    progress_cb = getattr(context, "progress_callback", None) or (
+        getattr(context, "_progress", None)
+    )
+    metrics = _simulate_section_accounting(
+        total_generation, total_consumption, wind, solar, context.config.battery,
+        progress_callback=progress_cb,
+    )
 
     result = df.with_columns(
         pl.Series("output_profile_kw", output_profile),
@@ -181,7 +187,7 @@ def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
     """Write one CSV per section."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_paths: list[Path] = []
-    
+
     # Generic base columns we want visible on all exported sections
     base_columns = ["timestamp", "wind_kw", "solar_kw", "total_generation_kw"]
 
@@ -189,7 +195,7 @@ def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
         # Resolve target columns ensuring we don't duplicate explicitly requested bases
         explicit_columns = [col for col in section.columns if col not in base_columns]
         target_columns = base_columns + explicit_columns
-        
+
         subset = df.select(target_columns)
         file_path = target_dir / section.file_name
         subset.write_csv(file_path)
@@ -203,6 +209,8 @@ def _simulate_section_accounting(
     wind: np.ndarray,
     solar: np.ndarray,
     config: BatteryConfig,
+    *,
+    progress_callback: Callable[[str, float, str], None] | None = None,
 ) -> dict[str, np.ndarray]:
     row_count = total_generation.shape[0]
     cum_wind = np.cumsum(wind, dtype=np.float32)
@@ -256,14 +264,19 @@ def _simulate_section_accounting(
     cumulative_stored_kw_min = 0.0
     prior_charge_count = 0.0
 
+    progress_interval = max(1, row_count // 20)
     for index in range(row_count):
+        if progress_callback and (index % progress_interval == 0 or index == row_count - 1):
+            loop_pct = (index + 1) / row_count
+            overall_pct = 15.0 + 75.0 * loop_pct
+            progress_callback("Simulating", overall_pct, f"Minute {index + 1} of {row_count}")
         current_cycle[index] = prior_charge_count
         cumulative_degradation[index] = prior_charge_count * config.degradation_per_cycle
         capacity_now_kw_min[index] = max(nominal_capacity_kw_min * (1.0 - cumulative_degradation[index]), 0.0)
 
         # state in kWh bounded by capacity
         battery_opening_kw_min[index] = min(max(prior_closing_kw_min, 0.0), capacity_now_kw_min[index])
-        
+
         excess = max(float(total_generation[index]) - float(total_consumption[index]), 0.0)
         deficit = max(float(total_consumption[index]) - float(total_generation[index]), 0.0)
         excess_power_kw[index] = excess
@@ -271,21 +284,20 @@ def _simulate_section_accounting(
 
         # available power (kW) we can practically draw based on stored minimum energy
         available_discharge_kw = battery_opening_kw_min[index]
-        
+
         # discharge capped by state of charge
         required_draw = min(available_discharge_kw, deficit)
         battery_draw_required_kw[index] = required_draw
-        
+
         # calculate loss on the drawn amount
         battery_draw_c_rate[index] = _rounded_c_rate(required_draw, nominal_capacity_kwh)
         battery_draw_loss_rate[index] = _lookup_loss_rate(battery_draw_c_rate[index], config.discharge_loss_table)
         battery_draw_loss_kw[index] = battery_draw_loss_rate[index] * required_draw
-        
+
         # total drawn from battery is required + loss, capped by what's actually there
         draw_total = required_draw + battery_draw_loss_kw[index]
         if draw_total > available_discharge_kw:
-            amount_over_limit = draw_total - available_discharge_kw
-            # shrink the required draw explicitly? If required + loss > available...
+            # Cap to available: we can only extract total battery energy.
             # Actually, to be perfectly physically consistent: we can only extract total battery energy.
             # Thus battery_draw_final_kw is minimum of required+loss vs available
             battery_draw_final_kw[index] = available_discharge_kw
@@ -304,12 +316,12 @@ def _simulate_section_accounting(
         if excess > 0.0 and remaining_headroom_kw > 0.0:
             # charge strictly proportional to remaining headroom
             store_available = min(excess, remaining_headroom_kw)
-            
+
         battery_store_available_kw[index] = store_available
         battery_store_c_rate[index] = _rounded_c_rate(store_available, nominal_capacity_kwh)
         battery_store_loss_rate[index] = _lookup_loss_rate(battery_store_c_rate[index], config.charge_loss_table)
         battery_store_loss_kw[index] = battery_store_loss_rate[index] * store_available
-        
+
         # cap what goes in by remaining headroom
         # the net energy entering battery state is store_available - loss
         net_store = max(store_available - battery_store_loss_kw[index], 0.0)
@@ -338,13 +350,13 @@ def _simulate_section_accounting(
             0.0,
         )
         soc_kw_min[index] = battery_closing_kw_min[index]
-        
+
         # normalized views
         if nominal_capacity_kw_min > 0:
             soc_fraction[index] = soc_kw_min[index] / nominal_capacity_kw_min
             discharge_cycle_count[index] = cumulative_drawn_kw_min / nominal_capacity_kw_min
             charge_cycle_count[index] = cumulative_stored_kw_min / nominal_capacity_kw_min
-        
+
         soc_pct[index] = soc_fraction[index] * 100.0
         cum_charge_count[index] = discharge_cycle_count[index] + charge_cycle_count[index]
 
@@ -352,7 +364,7 @@ def _simulate_section_accounting(
         energy_sources_kw[index] = total_generation[index] + battery_draw_final_kw[index] + grid_buy_kw[index]
         energy_uses_kw[index] = total_consumption[index] + battery_store_final_kw[index] + grid_sell_kw[index]
         energy_losses_kw[index] = battery_draw_loss_kw[index] + battery_store_loss_kw[index]
-        
+
         identity_1_error_kw[index] = energy_sources_kw[index] - energy_uses_kw[index] - energy_losses_kw[index]
         identity_1_ok[index] = int(abs(identity_1_error_kw[index]) <= IDENTITY_TOLERANCE)
 
@@ -361,7 +373,7 @@ def _simulate_section_accounting(
         bess_discharge_loss_kw[index] = battery_draw_loss_kw[index]
         bess_charge_kw[index] = battery_store_available_kw[index]
         bess_charge_loss_kw[index] = battery_store_loss_kw[index]
-        
+
         # BESS start/finish in kWh for identity 2
         bess_finish_kw_min[index] = (
             bess_start_kw_min[index]
@@ -433,25 +445,25 @@ def _lookup_loss_rate(c_rate: float, loss_table: dict[float, float]) -> float:
 
     c_rate = float(c_rate)
     sorted_keys = sorted(loss_table.keys())
-    
+
     if c_rate <= sorted_keys[0]:
         return float(loss_table[sorted_keys[0]])
     if c_rate >= sorted_keys[-1]:
         return float(loss_table[sorted_keys[-1]])
-        
+
     idx = bisect.bisect_left(sorted_keys, c_rate)
-    
+
     # We are exactly on a key
     if sorted_keys[idx] == c_rate:
         return float(loss_table[sorted_keys[idx]])
-        
+
     # We are explicitly between two keys
     lower_k = sorted_keys[idx - 1]
     upper_k = sorted_keys[idx]
-    
+
     lower_v = loss_table[lower_k]
     upper_v = loss_table[upper_k]
-    
+
     # linear interpolation formula: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
     fraction = (c_rate - lower_k) / (upper_k - lower_k)
     return float(lower_v + fraction * (upper_v - lower_v))

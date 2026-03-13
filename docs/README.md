@@ -1,6 +1,6 @@
 # BESS Model Documentation
 
-Comprehensive documentation for the BESS (Battery Energy Storage System) Model framework—a Python tool for simulating and sizing battery storage from minute-level solar and wind generation data.
+Comprehensive documentation for the BESS (Battery Energy Storage System) Model framework—a Python tool for simulating battery storage from minute-level solar and wind generation data.
 
 ## Documentation Index
 

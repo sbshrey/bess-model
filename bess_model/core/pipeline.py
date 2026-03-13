@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -16,6 +16,7 @@ from bess_model.flows.section_outputs import section_accounting_stage, write_sec
 from bess_model.results import SimulationResult
 
 StageFn = Callable[[pl.DataFrame, "SimulationContext"], pl.DataFrame]
+ProgressCallback = Callable[[str, float, str], None]
 
 
 @dataclass
@@ -25,6 +26,11 @@ class SimulationContext:
     config: SimulationConfig
     logger: logging.Logger
     balance_tolerance_kw: float = 1e-3
+    progress_callback: ProgressCallback | None = field(default=None, repr=False)
+
+    def _progress(self, stage: str, pct: float, detail: str) -> None:
+        if self.progress_callback:
+            self.progress_callback(stage, pct, detail)
 
     def log_stage(self, stage_name: str, df: pl.DataFrame) -> None:
         """Emit concise stage-level logging."""
@@ -42,14 +48,26 @@ class SimulationContext:
 FLOW_STAGES: list[StageFn] = [section_accounting_stage]
 
 
-def simulate_system(config: SimulationConfig) -> SimulationResult:
+def simulate_system(
+    config: SimulationConfig,
+    progress_callback: ProgressCallback | None = None,
+) -> SimulationResult:
     """Run a single BESS simulation from source data to KPI summary."""
     logger = logging.getLogger(f"bess_model.{config.plant_name}")
-    context = SimulationContext(config=config, logger=logger)
+    context = SimulationContext(config=config, logger=logger, progress_callback=progress_callback)
 
+    context._progress("Loading data", 2, "Loading solar and wind CSVs")
     solar, wind = load_generation_data(config)
+    context._progress("Loading data", 8, f"Loaded {solar.height} solar, {wind.height} wind rows")
+
+    context._progress("Aligning", 10, "Aligning to 1-minute grid")
     minute_data = align_generation_to_minute(solar, wind, config.preprocessing)
+    context._progress("Aligning", 12, f"Aligned {minute_data.height} minutes")
+
+    context._progress("Simulating", 15, f"Running section accounting ({minute_data.height} rows)")
     final_df = run_pipeline(minute_data, context, FLOW_STAGES)
+
+    context._progress("Summary", 90, "Computing summary metrics")
     metrics = compute_summary_metrics(final_df, config.plant_name)
     return SimulationResult(minute_flows=final_df, summary_metrics=metrics)
 

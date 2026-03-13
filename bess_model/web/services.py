@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import polars as pl
 import yaml
@@ -23,7 +23,7 @@ from bess_model.core.pipeline import (
     simulate_system,
     write_simulation_outputs,
 )
-from bess_model.flows.section_outputs import OUTPUT_SECTIONS, write_section_outputs
+from bess_model.flows.section_outputs import write_section_outputs
 from bess_model.results import SimulationResult
 
 
@@ -112,7 +112,7 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
     yaml_data = yaml.safe_load(text)
     if not isinstance(yaml_data, dict):
         yaml_data = {}
-        
+
     # Keys whose values must be parsed as YAML (e.g. dict/mapping fields)
     table_keys = {"battery.charge_loss_table", "battery.discharge_loss_table"}
 
@@ -147,7 +147,7 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
                 current[part] = {}
             current = current[part]
         current[parts[-1]] = value
-        
+
     updated_text = yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
     config_path.write_text(updated_text, encoding="utf-8")
     return SimulationConfig.from_yaml(config_path)
@@ -166,6 +166,135 @@ def run_simulation_from_form_frontend(config_path: Path, form_data: dict[str, st
     save_config_form(config_path, form_data)
     return run_simulation_from_frontend(config_path)
 
+
+def run_simulation_with_progress(
+    config_path: Path,
+    form_data: dict[str, str] | None,
+    progress_yield: Callable[[str, float, str], None],
+) -> tuple[SimulationConfig, SimulationResult, list[Path]]:
+    """Run simulation, calling progress_yield(stage, pct, detail) at each checkpoint."""
+
+    def progress_cb(stage: str, pct: float, detail: str) -> None:
+        progress_yield(stage, round(pct, 1), detail)
+
+    if form_data:
+        save_config_form(config_path, form_data)
+
+    config = SimulationConfig.from_yaml(config_path)
+
+    progress_cb("Loading data", 0, "Starting simulation")
+    result = simulate_system(config, progress_callback=progress_cb)
+
+    progress_cb("Writing outputs", 92, "Writing Parquet and summary")
+    write_simulation_outputs(result, config.output_dir, config.plant_name)
+
+    progress_cb("Writing sections", 96, "Writing section CSVs")
+    _write_stage_snapshots(config)
+
+    progress_cb("Done", 100, f"Completed {result.summary_metrics['rows']} rows")
+    return config, result, []
+
+
+
+def get_file_insights(relative_path: str | None) -> dict[str, str] | None:
+    """Return title, description, and how_it_works for a selected output file."""
+    if not relative_path:
+        return None
+    name = relative_path.split("/")[-1] if "/" in relative_path else relative_path
+    base = name.replace(".csv", "").replace(".parquet", "")
+
+    insights_map: dict[str, dict[str, str]] = {
+        "minute_flows": {
+            "title": "Minute-level flows",
+            "description": "Full simulation output with all derived columns in Parquet format.",
+            "how": "Combines aligned input with section accounting results (generation, battery state, grid, SOC, cycles).",
+        },
+        "summary": {
+            "title": "Summary metrics",
+            "description": "One-row KPIs aggregated from the minute-level flows.",
+            "how": "Sums grid buy/sell, takes final SOC and capacity, counts identity failures.",
+        },
+        "00_aligned_input": {
+            "title": "Aligned input",
+            "description": "Solar and wind generation aligned to a 1-minute grid.",
+            "how": "Loads both CSVs, resamples to 1-minute, applies gap-fill strategy. Short gaps are interpolated, long gaps zero-filled.",
+        },
+        "01_wind_solar_generation": {
+            "title": "Wind & solar generation",
+            "description": "Raw generation values per minute.",
+            "how": "From aligned input: wind_kw, solar_kw, total_generation_kw = solar + wind.",
+        },
+        "02_cumulative_generation": {
+            "title": "Cumulative generation",
+            "description": "Running total of wind, solar, and total generation (kW-min).",
+            "how": "Cumulative sum of each generation column over time.",
+        },
+        "03_output_profile": {
+            "title": "Output profile",
+            "description": "Site load and total consumption per minute.",
+            "how": "output_profile_kw + aux_consumption_kw = total_consumption_kw from config.",
+        },
+        "04_battery_capacity_cycles": {
+            "title": "Battery capacity & degradation",
+            "description": "Capacity degrades with cycle count.",
+            "how": "capacity_now = nominal × (1 − cycles × degradation_per_cycle). Linear degradation model.",
+        },
+        "05_excess_deficit_power": {
+            "title": "Excess / deficit power",
+            "description": "Surplus or shortfall vs consumption each minute.",
+            "how": "excess = max(generation − consumption, 0), deficit = max(consumption − generation, 0).",
+        },
+        "06_battery_opening_closing": {
+            "title": "Battery state",
+            "description": "Energy in battery at start and end of each minute (kW-min).",
+            "how": "opening = prior closing; closing = opening − draw + store, bounded by capacity.",
+        },
+        "07_power_from_battery": {
+            "title": "Power from battery",
+            "description": "Discharge: required draw, C-rate, losses, net delivered.",
+            "how": "Draw meets deficit. Loss from discharge_loss_table(C-rate). C-rate = power / capacity.",
+        },
+        "08_consume_from_grid": {
+            "title": "Grid import",
+            "description": "Power bought from grid when battery cannot cover deficit.",
+            "how": "grid_buy = max(deficit − battery_draw_delivered, 0).",
+        },
+        "09_power_to_battery": {
+            "title": "Power to battery",
+            "description": "Charge: available store, C-rate, losses, net stored.",
+            "how": "Store surplus up to headroom. Loss from charge_loss_table(C-rate).",
+        },
+        "10_sell_to_grid": {
+            "title": "Grid export",
+            "description": "Power sold to grid when surplus exceeds battery headroom.",
+            "how": "grid_sell = max(excess − battery_store_available, 0).",
+        },
+        "11_soc_calculations": {
+            "title": "State of charge",
+            "description": "SOC in kW-min, fraction (0–1), and percent.",
+            "how": "soc_fraction = closing_kw_min / nominal_capacity_kw_min; soc_pct = 100 × fraction.",
+        },
+        "12_battery_charge_cycles": {
+            "title": "Cycle counts",
+            "description": "Equivalent full charge/discharge cycles.",
+            "how": "Discharge and charge cycles = cumulative energy / capacity. cum_charge_count = both combined.",
+        },
+        "13_identity_equation_1": {
+            "title": "Energy balance identity",
+            "description": "Checks: sources = uses + losses.",
+            "how": "Sources: generation + draw + grid buy. Uses: consumption + store + grid sell. Losses: charge + discharge.",
+        },
+        "14_identity_equation_2": {
+            "title": "BESS state identity",
+            "description": "Checks battery state consistency.",
+            "how": "closing = start − discharge − loss + charge − loss. Validates internal bookkeeping.",
+        },
+    }
+
+    for key, info in insights_map.items():
+        if base.endswith(key) or key in base:
+            return info
+    return None
 
 
 def list_output_files(config: SimulationConfig) -> list[OutputFileInfo]:
@@ -234,12 +363,12 @@ def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
     grid_export = float(row.get("grid_export_energy_kwh", 0.0))
     net_impact = grid_export - grid_import
     impact_label = "Net Export" if net_impact >= 0 else "Net Import"
-    
+
     cycles = float(row.get("cumulative_charge_count", 0.0))
-    
+
     final_capacity = float(row.get("final_degraded_capacity_kwh", config.battery.capacity_kwh))
     soh_pct = (final_capacity / float(config.battery.capacity_kwh)) * 100.0 if float(config.battery.capacity_kwh) > 0 else 0.0
-    
+
     return [
         MetricCard(
             "Net Grid Impact",
@@ -570,12 +699,12 @@ def build_chart_svg_from_df(
             x = left_padding + ((x_values[index] - x_min) / x_span) * chart_width
             y = height - bottom_padding - ((float(value) / max_value) * chart_height)
             points.append(f"{x:.2f},{y:.2f}")
-            
+
             # Custom SVG tooltip group
             tooltip_x = max(min(x, width - 110), 110)
             tooltip_y = max(y - 20, 60)
             x_str = str(original_x_values[index])
-            
+
             hover_svg.append(
                 f'<g class="chart-point-group">'
                 f'<circle cx="{x:.2f}" cy="{y:.2f}" r="6" fill="transparent" class="chart-point-hover" />'
@@ -590,7 +719,7 @@ def build_chart_svg_from_df(
                 f'</g>'
                 f'</g>'
             )
-            
+
         legend_x = left_padding + (color_index * 130)
         series_svg.append(
             f'<polyline fill="none" stroke="{color}" stroke-width="2.5" points="{" ".join(points)}" />'
@@ -902,12 +1031,12 @@ def _format_cell_value(val: Any) -> Any:
             pass
     if hasattr(val, "isoformat"):
         return val.isoformat(sep=" ")
-    
+
     if isinstance(val, float):
         if math.isnan(val):
             return "NaN"
         return round(val, 6)
-        
+
     if isinstance(val, str):
         try:
             if "." in val or "e" in val.lower():
@@ -918,7 +1047,7 @@ def _format_cell_value(val: Any) -> Any:
                 return str(round(fval, 6))
         except ValueError:
             pass
-            
+
     return val
 
 def _build_row_date_predicate(

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 import math
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, stream_with_context, url_for
 
 from bess_model.config import SimulationConfig
 from bess_model.web.services import (
@@ -15,6 +15,7 @@ from bess_model.web.services import (
     build_chart_svg,
     build_preview_table,
     choose_default_output_file,
+    get_file_insights,
     list_output_files,
     load_metric_cards,
     load_config_text,
@@ -25,6 +26,7 @@ from bess_model.web.services import (
     resolve_output_file,
     run_simulation_from_frontend,
     run_simulation_from_form_frontend,
+    run_simulation_with_progress,
     save_config_text,
     save_config_form,
     save_csv_page_edits,
@@ -41,7 +43,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         """Generate a list of page numbers and None for ellipses."""
         if total_pages <= max_window:
             return list(range(1, total_pages + 1))
-        
+
         # We always want the first, last, and current page.
         # Figure out the layout like: 1 ... 4 5 6 ... 100
         window = []
@@ -63,6 +65,11 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
 
     app.jinja_env.globals["generate_page_window"] = generate_page_window
 
+    @app.get("/health")
+    def health():
+        """Health check endpoint for load balancers and monitoring."""
+        return jsonify({"status": "ok"}), 200
+
     @app.get("/")
     def dashboard():
         config_file = Path(app.config["CONFIG_PATH"])
@@ -80,7 +87,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         chart_cards = []
         date_filter = None
         metric_cards = load_metric_cards(config)
-        
+
         page = int(request.args.get("page", "1"))
         page_size = int(request.args.get("page_size", "20"))
         total_rows = 0
@@ -95,13 +102,13 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             except ValueError as e:
                 flash(str(e), "error")
                 return redirect(url_for("dashboard"))
-                
+
             if selected_path.suffix == ".csv":
                 filtered_csv = load_filtered_csv(selected_path, start_date=start_date, end_date=end_date)
                 total_rows = filtered_csv.df.height
                 total_pages = max(1, math.ceil(total_rows / page_size))
                 page = max(1, min(page, total_pages))
-                
+
                 start_idx = (page - 1) * page_size
                 paginated_df = filtered_csv.df.slice(start_idx, page_size)
 
@@ -125,6 +132,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             chart_svg=chart_svg,
             chart_cards=chart_cards,
             date_filter=date_filter,
+            file_insights=get_file_insights(selected),
             page=page,
             page_size=page_size,
             total_pages=total_pages,
@@ -151,6 +159,15 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             flash(f"Failed to save config: {exc}", "error")
         return redirect(url_for("dashboard"))
 
+    def _format_simulation_error(exc: Exception) -> str:
+        """Format simulation errors for clear user feedback."""
+        msg = str(exc)
+        if "FileNotFoundError" in type(exc).__name__ or "not found" in msg.lower():
+            return f"File not found: {msg}"
+        if "ValidationError" in type(exc).__name__ or "valid" in msg.lower():
+            return f"Configuration error: {msg}"
+        return f"Simulation failed: {msg}"
+
     @app.post("/run/simulate")
     def run_simulation():
         config_file = Path(app.config["CONFIG_PATH"])
@@ -163,7 +180,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
                 "success",
             )
         except Exception as exc:  # pragma: no cover - surfaced in UI only.
-            flash(f"Simulation failed: {exc}", "error")
+            flash(_format_simulation_error(exc), "error")
         return redirect(url_for("dashboard"))
 
     @app.post("/run/simulate-form")
@@ -177,9 +194,73 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
                 "success",
             )
         except Exception as exc:  # pragma: no cover - surfaced in UI only.
-            flash(f"Simulation failed: {exc}", "error")
+            flash(_format_simulation_error(exc), "error")
         return redirect(url_for("dashboard"))
 
+    @app.post("/api/run-simulation")
+    def api_run_simulation_stream():
+        """Stream simulation progress as NDJSON."""
+        import json
+        import threading
+        from queue import Empty, Queue
+
+        config_file = Path(app.config["CONFIG_PATH"])
+        has_config_text = "config_text" in request.form
+        config_text = request.form.get("config_text", "")
+        form_data = request.form.to_dict() if not has_config_text else None
+
+        def generate():
+            queue: Queue = Queue()
+
+            def run():
+                try:
+                    if has_config_text:
+                        save_config_text(config_file, config_text)
+                        form_data_arg = None
+                    else:
+                        form_data_arg = form_data
+
+                    def emit(stage: str, pct: float, detail: str) -> None:
+                        queue.put(("progress", stage, pct, detail))
+
+                    config, result, _ = run_simulation_with_progress(config_file, form_data_arg, emit)
+                    queue.put(("done", config, result, None))
+                except Exception as exc:
+                    queue.put(("done", None, None, exc))
+
+            thread = threading.Thread(target=run)
+            thread.start()
+
+            while True:
+                try:
+                    msg = queue.get(timeout=0.2)
+                except Empty:
+                    yield ""
+                    continue
+                if msg[0] == "progress":
+                    _, stage, pct, detail = msg
+                    yield json.dumps({"stage": stage, "pct": pct, "detail": detail}) + "\n"
+                else:
+                    _, config, result, exc = msg
+                    break
+
+            thread.join()
+            if exc:
+                yield json.dumps({
+                    "error": _format_simulation_error(exc),
+                    "redirect": url_for("dashboard"),
+                }) + "\n"
+            else:
+                yield json.dumps({
+                    "done": True,
+                    "redirect": url_for("dashboard"),
+                    "message": f"Simulation completed for {config.plant_name}. Rows: {result.summary_metrics['rows']}.",
+                }) + "\n"
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="application/x-ndjson",
+        )
 
     @app.get("/files/<path:relative_path>")
     def download_file(relative_path: str):
@@ -199,7 +280,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         except (FileNotFoundError, ValueError):
             flash("File not found.", "error")
             return redirect(url_for("dashboard"))
-            
+
         if path.suffix.lower() != ".csv":
             flash("Only CSV files can be edited in the browser.", "error")
             return redirect(url_for("dashboard", file=relative_path))

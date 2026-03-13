@@ -1,4 +1,40 @@
 (() => {
+  const showSessionFlash = () => {
+    try {
+      const success = sessionStorage.getItem("bess-flash-success");
+      const error = sessionStorage.getItem("bess-flash-error");
+      sessionStorage.removeItem("bess-flash-success");
+      sessionStorage.removeItem("bess-flash-error");
+      if (!success && !error) return;
+      let flashStack = document.querySelector(".flash-stack");
+      const pageShell = document.querySelector(".page-shell");
+      if (!pageShell) return;
+      if (!flashStack) {
+        flashStack = document.createElement("section");
+        flashStack.className = "flash-stack";
+        const header = pageShell.querySelector("header");
+        pageShell.insertBefore(flashStack, header?.nextSibling || pageShell.firstChild);
+      }
+      if (success) {
+        const div = document.createElement("div");
+        div.className = "flash flash-success";
+        div.textContent = success;
+        flashStack.appendChild(div);
+      }
+      if (error) {
+        const div = document.createElement("div");
+        div.className = "flash flash-error";
+        div.textContent = error;
+        flashStack.appendChild(div);
+      }
+    } catch (_) {}
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", showSessionFlash);
+  } else {
+    showSessionFlash();
+  }
+
   const initializeSidebarToggle = () => {
     const layout = document.querySelector(".dashboard-layout");
     const toggles = Array.from(document.querySelectorAll("[data-sidebar-toggle]"));
@@ -151,27 +187,109 @@
   };
 
   const initializeProgressBar = () => {
-    document.addEventListener("submit", (event) => {
+    document.addEventListener("submit", async (event) => {
       const form = event.target;
-      // We check if the submitter (like a button with formaction) overrides the action
-      // Or fallback to the form's action itself.
       const submitter = event.submitter;
       const actionUrl = submitter?.getAttribute("formaction") || form.getAttribute("action") || "";
-      
-      if (actionUrl.includes("/run/simulate") || actionUrl.includes("/run/size")) {
-        // Prevent stacking if somehow clicked twice
-        if (!document.querySelector(".global-progress")) {
-          const progress = document.createElement("div");
-          progress.className = "global-progress";
-          document.body.prepend(progress);
-          
-          // disable submit buttons inside this form to prevent double submission
-          const buttons = form.querySelectorAll("button[type='submit']");
-          buttons.forEach(b => {
-             b.style.pointerEvents = "none";
-             b.style.opacity = "0.7";
-          });
+
+      if (!actionUrl.includes("/run/simulate")) return;
+
+      event.preventDefault();
+      if (document.querySelector(".simulation-loading")) return;
+
+      const overlay = document.createElement("div");
+      overlay.className = "simulation-loading";
+      overlay.setAttribute("role", "status");
+      overlay.setAttribute("aria-live", "polite");
+
+      const stageEl = document.createElement("p");
+      stageEl.className = "simulation-loading-text";
+      stageEl.textContent = "Starting…";
+
+      const detailEl = document.createElement("p");
+      detailEl.className = "simulation-loading-detail";
+      detailEl.textContent = "";
+
+      const pctEl = document.createElement("p");
+      pctEl.className = "simulation-loading-pct";
+      pctEl.textContent = "0%";
+
+      overlay.innerHTML = '<div class="simulation-loading-bar"><span class="simulation-loading-bar-fill"></span></div>';
+      overlay.appendChild(stageEl);
+      overlay.appendChild(detailEl);
+      overlay.appendChild(pctEl);
+      document.body.prepend(overlay);
+
+      const barFill = overlay.querySelector(".simulation-loading-bar-fill");
+      const buttons = form.querySelectorAll("button[type='submit']");
+      buttons.forEach(b => {
+        b.disabled = true;
+        b.style.pointerEvents = "none";
+        b.style.opacity = "0.7";
+      });
+
+      try {
+        const formData = new FormData(form);
+        const res = await fetch("/api/run-simulation", { method: "POST", body: formData });
+        if (!res.ok) throw new Error("Simulation request failed");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let lastMessage = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              lastMessage = msg;
+              if (msg.error) {
+                stageEl.textContent = "Error";
+                detailEl.textContent = msg.error;
+                barFill.style.width = "0%";
+                if (msg.redirect) {
+                  sessionStorage.setItem("bess-flash-error", msg.error);
+                  window.location.href = msg.redirect;
+                  return;
+                }
+                break;
+              }
+              stageEl.textContent = msg.stage || stageEl.textContent;
+              detailEl.textContent = msg.detail || "";
+              const pct = msg.pct != null ? msg.pct : (msg.done ? 100 : 0);
+              pctEl.textContent = `${Math.round(pct)}%`;
+              if (barFill) barFill.style.width = `${pct}%`;
+              if (msg.done && msg.redirect) {
+                if (msg.message) sessionStorage.setItem("bess-flash-success", msg.message);
+                window.location.href = msg.redirect;
+                return;
+              }
+            } catch (_) {}
+          }
         }
+
+        if (lastMessage?.done && lastMessage?.redirect) {
+          if (lastMessage.message) sessionStorage.setItem("bess-flash-success", lastMessage.message);
+          window.location.href = lastMessage.redirect;
+        } else if (lastMessage?.error && lastMessage?.redirect) {
+          sessionStorage.setItem("bess-flash-error", lastMessage.error);
+          window.location.href = lastMessage.redirect;
+        }
+      } catch (err) {
+        stageEl.textContent = "Error";
+        detailEl.textContent = err.message || "Simulation failed";
+        barFill.style.width = "0%";
+        buttons.forEach(b => {
+          b.disabled = false;
+          b.style.pointerEvents = "";
+          b.style.opacity = "1";
+        });
       }
     });
   };
@@ -180,11 +298,11 @@
     const resizer = document.querySelector(".sidebar-resizer");
     const sidebar = document.querySelector(".sidebar");
     const layout = document.querySelector(".dashboard-layout");
-    
+
     if (!resizer || !sidebar || !layout) return;
 
     let isResizing = false;
-    
+
     // Load previously saved width
     const savedWidth = localStorage.getItem("bess-dashboard-sidebar-width");
     if (savedWidth) {
@@ -202,7 +320,7 @@
       if (!isResizing) return;
       const layoutRect = layout.getBoundingClientRect();
       let newWidth = e.clientX - layoutRect.left;
-      
+
       // Enforce min/max widths
       if (newWidth < 250) newWidth = 250;
       if (newWidth > Math.min(800, window.innerWidth * 0.4)) newWidth = Math.min(800, window.innerWidth * 0.4);
@@ -257,11 +375,11 @@
       if (!isDragging || !brushGroup || !currentWrap) return;
       const rect = currentWrap.getBoundingClientRect();
       const currentX = e.clientX - rect.left;
-      
+
       const clampedX = Math.max(0, Math.min(rect.width, currentX));
       const width = Math.abs(clampedX - startX);
       const left = Math.min(clampedX, startX);
-      
+
       brushGroup.style.left = `${left}px`;
       brushGroup.style.width = `${width}px`;
     });
@@ -316,15 +434,15 @@
     document.addEventListener("mouseup", async (e) => {
       if (!isDragging || !brushGroup || !currentWrap) return;
       isDragging = false;
-      
+
       const wrap = currentWrap;
       const rect = wrap.getBoundingClientRect();
       const currentX = e.clientX - rect.left;
       const clampedX = Math.max(0, Math.min(rect.width, currentX));
-      
+
       const left = Math.min(clampedX, startX);
       const right = Math.max(clampedX, startX);
-      
+
       brushGroup.remove();
       brushGroup = null;
       currentWrap = null;
@@ -368,7 +486,7 @@
       const url = `/api/render-charts/${encodeURIComponent(filePath)}?start_date=${encodeURIComponent(s1)}&end_date=${encodeURIComponent(s2)}`;
       await fetchAndRenderCharts(url);
     });
-    
+
     document.addEventListener("click", async (e) => {
        if (e.target.closest(".reset-zoom-btn")) {
           const filePath = panel.getAttribute("data-file-path");

@@ -38,7 +38,7 @@
         <h2>Configuration</h2>
         <p>Edit variables and run from here</p>
       </div>
-      
+
       <div class="tabs-wrapper" style="margin-bottom: 1rem;">
         <div class="tabs-header" style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
           <button type="button" class="tab-btn active" data-tab-target="#tab-visual" style="background:none; border:none; cursor:pointer; font-weight:600; color:var(--accent);">Visual Form</button>
@@ -52,17 +52,17 @@
               <label>Plant Name <input type="text" name="plant_name" value="{{ config.plant_name }}" class="input-field"></label>
               <label>Output Dir <input type="text" name="output_dir" value="{{ config.output_dir }}" class="input-field"></label>
             </div>
-            
+
             <div class="form-section" style="margin-top: 1rem;">
               <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-folder" style="font-size: 1.1em;">📁</span> Data Source Paths</h4>
               <label>Solar CSV Path <input type="text" name="data.solar_path" value="{{ config.data.solar_path }}" class="input-field"></label>
               <label>Wind CSV Path <input type="text" name="data.wind_path" value="{{ config.data.wind_path }}" class="input-field"></label>
             </div>
-            
+
             <div class="form-section" style="margin-top: 1rem;">
               <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-settings" style="font-size: 1.1em;">🪄</span> Preprocessing</h4>
               <label>Data Frequency <input type="text" name="preprocessing.frequency" value="{{ config.preprocessing.frequency }}" class="input-field"></label>
-              <label>Gap Fill Strategy 
+              <label>Gap Fill Strategy
                 <select name="preprocessing.gap_fill" class="input-field">
                   <option value="linear_interpolate" {% if config.preprocessing.gap_fill == 'linear_interpolate' %}selected{% endif %}>Linear Interpolation</option>
                   <option value="zero" {% if config.preprocessing.gap_fill == 'zero' %}selected{% endif %}>Zero Fill</option>
@@ -131,7 +131,7 @@
               t.style.color = 'var(--text-muted)';
             });
             document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-            
+
             tab.classList.add('active');
             tab.style.fontWeight = '600';
             tab.style.color = 'var(--accent)';
@@ -185,7 +185,7 @@
               <input type="hidden" name="end_date" value="{{ date_filter.end_date }}">
             {% endif %}
           </form>
-          
+
           <!-- Download & Edit Buttons -->
           {% if selected_file %}
             <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -195,9 +195,9 @@
               {% endif %}
             </div>
           {% endif %}
-          
+
           <div style="flex-grow: 1;"></div>
-          
+
           <!-- Date Filter Form -->
           {% if date_filter and date_filter.enabled %}
             <form method="get" action="{{ url_for('dashboard') }}" class="range-form" style="margin: 0; display: flex; align-items: center; gap: 1rem; background: var(--surface); padding: 0.25rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);">
@@ -221,6 +221,8 @@
       {% if date_filter and date_filter.enabled %}
         <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows from {{ date_filter.start_date }} to {{ date_filter.end_date }}.</p>
       {% endif %}
+      <div class="chart-and-insights">
+        <div class="chart-area">
       {% if chart_cards %}
         <div class="chart-grid dashboard-chart-grid">
           {% for chart in chart_cards %}
@@ -249,6 +251,15 @@
       {% else %}
         <p class="empty-state">No chartable CSV selected yet.</p>
       {% endif %}
+        </div>
+        {% if file_insights %}
+        <aside class="file-insights-panel">
+          <h3 class="file-insights-title">{{ file_insights.title }}</h3>
+          <p class="file-insights-desc">{{ file_insights.description }}</p>
+          <p class="file-insights-how"><strong>How:</strong> {{ file_insights.how }}</p>
+        </aside>
+        {% endif %}
+      </div>
     </section>
 
     <section class="panel content-panel dashboard-table-panel">
@@ -301,7 +312,7 @@
           {% if page > 1 %}
             <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page - 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
           {% endif %}
-          
+
           <div class="pagination-numbers">
             {% for p in generate_page_window(page, total_pages) %}
               {% if p is none %}
@@ -311,7 +322,7 @@
               {% endif %}
             {% endfor %}
           </div>
-          
+
           {% if page < total_pages %}
             <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page + 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Next</a>
           {% endif %}

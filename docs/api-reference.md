@@ -2,6 +2,12 @@
 
 ## HTTP Routes
 
+### Health
+
+| Method | Path | Handler | Description |
+|--------|------|---------|-------------|
+| GET | `/health` | `health` | Health check for load balancers and monitoring. Returns `{"status": "ok"}`. |
+
 ### Dashboard
 
 | Method | Path | Handler | Description |
@@ -21,6 +27,7 @@
 |--------|------|---------|-------------|
 | POST | `/run/simulate` | `run_simulation` | Save YAML + run simulation |
 | POST | `/run/simulate-form` | `run_simulation_form` | Save form + run simulation |
+| POST | `/api/run-simulation` | `api_run_simulation_stream` | Run simulation with streaming NDJSON progress (`stage`, `pct`, `detail`) |
 
 ### Files
 
