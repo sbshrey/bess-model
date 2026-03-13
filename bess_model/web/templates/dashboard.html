@@ -39,28 +39,28 @@
         <p>Edit variables and run from here</p>
       </div>
 
-      <div class="tabs-wrapper" style="margin-bottom: 1rem;">
-        <div class="tabs-header" style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
-          <button type="button" class="tab-btn active" data-tab-target="#tab-visual" style="background:none; border:none; cursor:pointer; font-weight:600; color:var(--accent);">Visual Form</button>
-          <button type="button" class="tab-btn" data-tab-target="#tab-yaml" style="background:none; border:none; cursor:pointer; font-weight:500; color:var(--text-muted);">Raw YAML</button>
+      <div class="tabs-wrapper">
+        <div class="tabs-header">
+          <button type="button" class="tab-btn active" data-tab-target="#tab-visual">Visual Form</button>
+          <button type="button" class="tab-btn" data-tab-target="#tab-yaml">Raw YAML</button>
         </div>
 
-        <div class="tab-content active" id="tab-visual" style="margin-top: 1rem;">
+        <div class="tab-content active" id="tab-visual">
           <form method="post" action="{{ url_for('save_config_form_route') }}" class="stacked-form config-visual-form">
             <div class="form-section">
-              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-database" style="font-size: 1.1em;">⚙️</span> Basic Settings</h4>
+              <h4 class="form-section-title">Basic Settings</h4>
               <label>Plant Name <input type="text" name="plant_name" value="{{ config.plant_name }}" class="input-field"></label>
               <label>Output Dir <input type="text" name="output_dir" value="{{ config.output_dir }}" class="input-field"></label>
             </div>
 
-            <div class="form-section" style="margin-top: 1rem;">
-              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-folder" style="font-size: 1.1em;">📁</span> Data Source Paths</h4>
+            <div class="form-section">
+              <h4 class="form-section-title">Data Source Paths</h4>
               <label>Solar CSV Path <input type="text" name="data.solar_path" value="{{ config.data.solar_path }}" class="input-field"></label>
               <label>Wind CSV Path <input type="text" name="data.wind_path" value="{{ config.data.wind_path }}" class="input-field"></label>
             </div>
 
-            <div class="form-section" style="margin-top: 1rem;">
-              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-settings" style="font-size: 1.1em;">🪄</span> Preprocessing</h4>
+            <div class="form-section">
+              <h4 class="form-section-title">Preprocessing</h4>
               <label>Data Frequency <input type="text" name="preprocessing.frequency" value="{{ config.preprocessing.frequency }}" class="input-field"></label>
               <label>Gap Fill Strategy
                 <select name="preprocessing.gap_fill" class="input-field">
@@ -71,16 +71,16 @@
               <label>Max Gap Minutes <input type="number" name="preprocessing.max_interpolation_gap_minutes" value="{{ config.preprocessing.max_interpolation_gap_minutes }}" class="input-field"></label>
             </div>
 
-            <div class="form-section" style="margin-top: 1rem;">
-              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-zap" style="font-size: 1.1em;">⚡</span> Grid & Load</h4>
+            <div class="form-section">
+              <h4 class="form-section-title">Grid & Load</h4>
               <label>Grid Export Limit (kW) <input type="number" step="any" name="grid.export_limit_kw" value="{{ config.grid.export_limit_kw }}" class="input-field"></label>
               <label>Grid Import Limit (kW) <input type="number" step="any" name="grid.import_limit_kw" value="{{ config.grid.import_limit_kw if config.grid.import_limit_kw is not none else '' }}" class="input-field" placeholder="null"></label>
               <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw }}" class="input-field"></label>
               <label>Aux Consumption (kW) <input type="number" step="any" name="load.aux_consumption_kw" value="{{ config.load.aux_consumption_kw }}" class="input-field"></label>
             </div>
 
-            <div class="form-section" style="margin-top: 1rem;">
-              <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;"><span class="lucide-battery-charging" style="font-size: 1.1em;">🔋</span> Battery Specs</h4>
+            <div class="form-section">
+              <h4 class="form-section-title">Battery Specs</h4>
               <label>Nominal Power (kW) <input type="number" step="any" name="battery.nominal_power_kw" value="{{ config.battery.nominal_power_kw }}" class="input-field"></label>
               <label>Duration (Hours) <input type="number" step="any" name="battery.duration_hours" value="{{ config.battery.duration_hours }}" class="input-field"></label>
               <label>Charge Efficiency (0-1) <input type="number" step="any" name="battery.charge_efficiency" value="{{ config.battery.charge_efficiency }}" class="input-field"></label>
@@ -101,17 +101,17 @@
               </label>
             </div>
 
-            <div class="button-stack" style="margin-top: 1.5rem;">
+            <div class="button-stack">
               <button type="submit" class="button button-secondary">Save Config</button>
               <button type="submit" formaction="{{ url_for('run_simulation_form') }}" class="button">Run Simulation</button>
             </div>
           </form>
         </div>
 
-        <div class="tab-content" id="tab-yaml" style="display: none; margin-top: 1rem;">
+        <div class="tab-content" id="tab-yaml">
           <form method="post" action="{{ url_for('save_config') }}" class="stacked-form">
-            <textarea name="config_text" class="yaml-editor" spellcheck="false" style="min-height: 400px;">{{ config_text }}</textarea>
-            <div class="button-stack" style="margin-top: 1rem;">
+            <textarea name="config_text" class="yaml-editor" spellcheck="false">{{ config_text }}</textarea>
+            <div class="button-stack">
               <button type="submit" class="button button-secondary">Save YAML</button>
               <button type="submit" formaction="{{ url_for('run_simulation') }}" class="button">Run Simulation</button>
             </div>
@@ -119,29 +119,6 @@
         </div>
       </div>
     </section>
-
-    <script>
-      document.addEventListener('DOMContentLoaded', () => {
-        const tabs = document.querySelectorAll('.tab-btn');
-        tabs.forEach(tab => {
-          tab.addEventListener('click', () => {
-            tabs.forEach(t => {
-              t.classList.remove('active');
-              t.style.fontWeight = '500';
-              t.style.color = 'var(--text-muted)';
-            });
-            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-
-            tab.classList.add('active');
-            tab.style.fontWeight = '600';
-            tab.style.color = 'var(--accent)';
-            document.querySelector(tab.dataset.tabTarget).style.display = 'block';
-          });
-        });
-      });
-    </script>
-
-
 
   </aside>
 
@@ -168,12 +145,11 @@
     </section>
 
     <section class="panel content-panel dashboard-chart-panel" data-file-path="{{ selected_file }}">
-      <div class="panel-header" style="display: flex; flex-direction: column; gap: 1rem; padding-bottom: 1rem;">
-        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-          <!-- File Selection Dropdown -->
-          <form method="get" action="{{ url_for('dashboard') }}" style="margin: 0; display: flex; align-items: center; gap: 0.75rem; flex-grow: 1; max-width: 600px;">
-            <label for="file-select" style="font-weight: 600; white-space: nowrap; margin: 0; font-size: 1.1rem; color: var(--text-muted);">File:</label>
-            <select id="file-select" name="file" onchange="this.form.submit()" class="file-selector" style="flex-grow: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); font-size: 1.0rem; font-weight: 500; background-color: var(--surface);">
+      <div class="panel-header panel-header-stack">
+        <div class="file-toolbar">
+          <form method="get" action="{{ url_for('dashboard') }}" class="file-select-form">
+            <label for="file-select" class="file-select-label">File:</label>
+            <select id="file-select" name="file" onchange="this.form.submit()" class="file-selector">
               {% for item in outputs %}
                 <option value="{{ item.relative_path }}" {% if selected_file == item.relative_path %}selected{% endif %}>
                   {{ item.name }} ({{ '%.1f'|format(item.size_kb) }} KB)
@@ -186,33 +162,31 @@
             {% endif %}
           </form>
 
-          <!-- Download & Edit Buttons -->
           {% if selected_file %}
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
-              <a class="button button-ghost button-small" href="{{ url_for('download_file', relative_path=selected_file) }}" style="padding: 0.5rem 1rem;">Download</a>
+            <div class="file-actions-row">
+              <a class="button button-ghost button-small" href="{{ url_for('download_file', relative_path=selected_file) }}">Download</a>
               {% if selected_file.endswith('.csv') %}
-                <a class="button button-ghost button-small" href="{{ url_for('edit_csv', relative_path=selected_file, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}" style="padding: 0.5rem 1rem;">Edit CSV</a>
+                <a class="button button-ghost button-small" href="{{ url_for('edit_csv', relative_path=selected_file, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Edit CSV</a>
               {% endif %}
             </div>
           {% endif %}
 
-          <div style="flex-grow: 1;"></div>
+          <div class="toolbar-spacer"></div>
 
-          <!-- Date Filter Form -->
           {% if date_filter and date_filter.enabled %}
-            <form method="get" action="{{ url_for('dashboard') }}" class="range-form" style="margin: 0; display: flex; align-items: center; gap: 1rem; background: var(--surface); padding: 0.25rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);">
+            <form method="get" action="{{ url_for('dashboard') }}" class="date-filter-form">
               <input type="hidden" name="file" value="{{ selected_file or '' }}">
-              <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
-                <span style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin: 0;">Start</span>
-                <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}" style="border: none; background: transparent; padding: 0.25rem; font-size: 0.95rem;">
+              <label class="date-filter-label">
+                <span>Start</span>
+                <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
               </label>
-              <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
-                <span style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin: 0;">End</span>
-                <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}" style="border: none; background: transparent; padding: 0.25rem; font-size: 0.95rem;">
+              <label class="date-filter-label">
+                <span>End</span>
+                <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
               </label>
-              <div style="display: flex; gap: 0.25rem;">
-                <button type="submit" class="button button-ghost button-small" style="padding: 0.25rem 0.75rem;">Apply</button>
-                <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}" style="padding: 0.25rem 0.75rem;">Clear</a>
+              <div class="date-filter-actions">
+                <button type="submit" class="button button-ghost button-small">Apply</button>
+                <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}">Clear</a>
               </div>
             </form>
           {% endif %}
@@ -308,7 +282,7 @@
             </tbody>
           </table>
         </div>
-        <div class="pagination sticky-pagination dashboard-pagination" style="margin-top: 1rem;">
+        <div class="pagination sticky-pagination dashboard-pagination">
           {% if page > 1 %}
             <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page - 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
           {% endif %}

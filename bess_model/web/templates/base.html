@@ -20,7 +20,10 @@
         {% if messages %}
           <section class="flash-stack">
             {% for category, message in messages %}
-              <div class="flash flash-{{ category }}">{{ message }}</div>
+              <div class="flash flash-{{ category }}" data-flash>
+                <span>{{ message }}</span>
+                <button type="button" class="flash-close" aria-label="Dismiss">&times;</button>
+              </div>
             {% endfor %}
           </section>
         {% endif %}

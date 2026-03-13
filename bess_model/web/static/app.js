@@ -15,24 +15,75 @@
         const header = pageShell.querySelector("header");
         pageShell.insertBefore(flashStack, header?.nextSibling || pageShell.firstChild);
       }
-      if (success) {
+      const createFlash = (msg, cls) => {
         const div = document.createElement("div");
-        div.className = "flash flash-success";
-        div.textContent = success;
+        div.className = `flash ${cls}`;
+        div.setAttribute("data-flash", "");
+        const span = document.createElement("span");
+        span.textContent = msg;
+        div.appendChild(span);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "flash-close";
+        btn.setAttribute("aria-label", "Dismiss");
+        btn.innerHTML = "&times;";
+        div.appendChild(btn);
         flashStack.appendChild(div);
-      }
-      if (error) {
-        const div = document.createElement("div");
-        div.className = "flash flash-error";
-        div.textContent = error;
-        flashStack.appendChild(div);
-      }
+      };
+      if (success) createFlash(success, "flash-success");
+      if (error) createFlash(error, "flash-error");
     } catch (_) {}
   };
+
+  const initializeFlashDismiss = () => {
+    const dismissFlash = (el) => {
+      el.classList.add("flash-dismissing");
+      el.addEventListener("transitionend", () => el.remove(), { once: true });
+      setTimeout(() => el.remove(), 500);
+    };
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest(".flash-close");
+      if (btn) {
+        const flash = btn.closest(".flash");
+        if (flash) dismissFlash(flash);
+      }
+    });
+
+    document.querySelectorAll("[data-flash]").forEach((el) => {
+      setTimeout(() => dismissFlash(el), 6000);
+    });
+  };
+
+  const initializeTabs = () => {
+    document.querySelectorAll(".tabs-header").forEach((header) => {
+      const wrapper = header.closest(".tabs-wrapper");
+      if (!wrapper) return;
+      const buttons = header.querySelectorAll(".tab-btn");
+      const contents = wrapper.querySelectorAll(".tab-content");
+
+      buttons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          buttons.forEach((b) => b.classList.remove("active"));
+          contents.forEach((c) => c.classList.remove("active"));
+          btn.classList.add("active");
+          const target = wrapper.querySelector(btn.dataset.tabTarget);
+          if (target) target.classList.add("active");
+        });
+      });
+    });
+  };
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", showSessionFlash);
+    document.addEventListener("DOMContentLoaded", () => {
+      showSessionFlash();
+      initializeFlashDismiss();
+      initializeTabs();
+    });
   } else {
     showSessionFlash();
+    initializeFlashDismiss();
+    initializeTabs();
   }
 
   const initializeSidebarToggle = () => {
@@ -61,7 +112,7 @@
       try {
         window.localStorage.setItem(storageKey, collapsed ? "1" : "0");
       } catch (error) {
-        // Ignore storage failures in restricted browsers.
+        /* restricted browser */
       }
       syncToggleState();
     };
@@ -73,7 +124,7 @@
           sidebar.scrollTop = Number.parseInt(savedScroll, 10) || 0;
         }
       } catch (error) {
-        // Ignore storage failures in restricted browsers.
+        /* restricted browser */
       }
 
       let scrollFrame = 0;
@@ -85,7 +136,7 @@
           try {
             window.sessionStorage.setItem(scrollKey, String(sidebar.scrollTop));
           } catch (error) {
-            // Ignore storage failures in restricted browsers.
+            /* restricted browser */
           }
           scrollFrame = 0;
         });
@@ -95,7 +146,7 @@
         try {
           window.sessionStorage.setItem(scrollKey, String(sidebar.scrollTop));
         } catch (error) {
-          // Ignore storage failures in restricted browsers.
+          /* restricted browser */
         }
       });
     }
@@ -105,7 +156,7 @@
         layout.classList.add("sidebar-collapsed");
       }
     } catch (error) {
-      // Ignore storage failures in restricted browsers.
+      /* restricted browser */
     }
 
     syncToggleState();
@@ -122,7 +173,7 @@
         try {
           layout.classList.toggle("sidebar-collapsed", window.localStorage.getItem(storageKey) === "1");
         } catch (error) {
-          // Ignore storage failures in restricted browsers.
+          /* restricted browser */
         }
       }
       syncToggleState();
@@ -202,9 +253,19 @@
       overlay.setAttribute("role", "status");
       overlay.setAttribute("aria-live", "polite");
 
+      const barWrap = document.createElement("div");
+      barWrap.className = "simulation-loading-bar";
+      const barFill = document.createElement("span");
+      barFill.className = "simulation-loading-bar-fill";
+      barWrap.appendChild(barFill);
+      overlay.appendChild(barWrap);
+
+      const card = document.createElement("div");
+      card.className = "simulation-loading-card";
+
       const stageEl = document.createElement("p");
       stageEl.className = "simulation-loading-text";
-      stageEl.textContent = "Starting…";
+      stageEl.textContent = "Starting\u2026";
 
       const detailEl = document.createElement("p");
       detailEl.className = "simulation-loading-detail";
@@ -214,18 +275,15 @@
       pctEl.className = "simulation-loading-pct";
       pctEl.textContent = "0%";
 
-      overlay.innerHTML = '<div class="simulation-loading-bar"><span class="simulation-loading-bar-fill"></span></div>';
-      overlay.appendChild(stageEl);
-      overlay.appendChild(detailEl);
-      overlay.appendChild(pctEl);
+      card.appendChild(stageEl);
+      card.appendChild(detailEl);
+      card.appendChild(pctEl);
+      overlay.appendChild(card);
       document.body.prepend(overlay);
 
-      const barFill = overlay.querySelector(".simulation-loading-bar-fill");
       const buttons = form.querySelectorAll("button[type='submit']");
-      buttons.forEach(b => {
+      buttons.forEach((b) => {
         b.disabled = true;
-        b.style.pointerEvents = "none";
-        b.style.opacity = "0.7";
       });
 
       try {
@@ -264,7 +322,7 @@
               detailEl.textContent = msg.detail || "";
               const pct = msg.pct != null ? msg.pct : (msg.done ? 100 : 0);
               pctEl.textContent = `${Math.round(pct)}%`;
-              if (barFill) barFill.style.width = `${pct}%`;
+              barFill.style.width = `${pct}%`;
               if (msg.done && msg.redirect) {
                 if (msg.message) sessionStorage.setItem("bess-flash-success", msg.message);
                 window.location.href = msg.redirect;
@@ -285,10 +343,8 @@
         stageEl.textContent = "Error";
         detailEl.textContent = err.message || "Simulation failed";
         barFill.style.width = "0%";
-        buttons.forEach(b => {
+        buttons.forEach((b) => {
           b.disabled = false;
-          b.style.pointerEvents = "";
-          b.style.opacity = "1";
         });
       }
     });
@@ -303,13 +359,12 @@
 
     let isResizing = false;
 
-    // Load previously saved width
     const savedWidth = localStorage.getItem("bess-dashboard-sidebar-width");
     if (savedWidth) {
       layout.style.setProperty("--sidebar-width", `${savedWidth}px`);
     }
 
-    resizer.addEventListener("mousedown", (e) => {
+    resizer.addEventListener("mousedown", () => {
       isResizing = true;
       resizer.classList.add("is-resizing");
       document.body.style.cursor = "col-resize";
@@ -321,7 +376,6 @@
       const layoutRect = layout.getBoundingClientRect();
       let newWidth = e.clientX - layoutRect.left;
 
-      // Enforce min/max widths
       if (newWidth < 250) newWidth = 250;
       if (newWidth > Math.min(800, window.innerWidth * 0.4)) newWidth = Math.min(800, window.innerWidth * 0.4);
 
