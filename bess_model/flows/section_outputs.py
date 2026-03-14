@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -99,6 +100,8 @@ OUTPUT_SECTIONS: tuple[OutputSection, ...] = (
             "bess_charge_kw",
             "bess_charge_loss_kw",
             "bess_finish_kw_min",
+            "battery_closing_kw_min",
+            "identity_2_error_kw_min",
             "identity_2_ok",
         ),
     ),
@@ -127,10 +130,18 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
     progress_cb = getattr(context, "progress_callback", None) or (
         getattr(context, "_progress", None)
     )
+    preprocessing = context.config.preprocessing
     metrics = _simulate_section_accounting(
-        total_generation, total_consumption, wind, solar, context.config.battery,
+        total_generation,
+        total_consumption,
+        wind,
+        solar,
+        context.config.battery,
+        dtype=preprocessing.simulation_dtype,
         progress_callback=progress_cb,
     )
+    del total_generation, wind, solar
+    gc.collect()
 
     result = df.with_columns(
         pl.Series("output_profile_kw", output_profile),
@@ -177,6 +188,7 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
         pl.Series("bess_charge_kw", metrics["bess_charge_kw"]),
         pl.Series("bess_charge_loss_kw", metrics["bess_charge_loss_kw"]),
         pl.Series("bess_finish_kw_min", metrics["bess_finish_kw_min"]),
+        pl.Series("identity_2_error_kw_min", metrics["identity_2_error_kw_min"]),
         pl.Series("identity_2_ok", metrics["identity_2_ok"]),
     )
     context.validate_balance(result)
@@ -210,51 +222,55 @@ def _simulate_section_accounting(
     solar: np.ndarray,
     config: BatteryConfig,
     *,
+    dtype: str = "float32",
     progress_callback: Callable[[str, float, str], None] | None = None,
 ) -> dict[str, np.ndarray]:
     row_count = total_generation.shape[0]
-    cum_wind = np.cumsum(wind, dtype=np.float32)
-    cum_solar = np.cumsum(solar, dtype=np.float32)
-    cum_total = np.cumsum(total_generation, dtype=np.float32)
+    np_dtype = np.float32 if dtype == "float32" else np.float64
 
-    current_cycle = np.zeros(row_count, dtype=np.float32)
-    cumulative_degradation = np.zeros(row_count, dtype=np.float32)
-    capacity_now_kw_min = np.zeros(row_count, dtype=np.float32)
-    excess_power_kw = np.zeros(row_count, dtype=np.float32)
-    deficit_power_kw = np.zeros(row_count, dtype=np.float32)
-    battery_opening_kw_min = np.zeros(row_count, dtype=np.float32)
-    battery_closing_kw_min = np.zeros(row_count, dtype=np.float32)
-    battery_draw_required_kw = np.zeros(row_count, dtype=np.float32)
-    battery_draw_c_rate = np.zeros(row_count, dtype=np.float32)
-    battery_draw_loss_rate = np.zeros(row_count, dtype=np.float32)
-    battery_draw_loss_kw = np.zeros(row_count, dtype=np.float32)
-    battery_draw_final_kw = np.zeros(row_count, dtype=np.float32)
-    battery_draw_cumulative_kw_min = np.zeros(row_count, dtype=np.float32)
-    grid_buy_kw = np.zeros(row_count, dtype=np.float32)
-    battery_store_available_kw = np.zeros(row_count, dtype=np.float32)
-    battery_store_c_rate = np.zeros(row_count, dtype=np.float32)
-    battery_store_loss_rate = np.zeros(row_count, dtype=np.float32)
-    battery_store_loss_kw = np.zeros(row_count, dtype=np.float32)
-    battery_store_final_kw = np.zeros(row_count, dtype=np.float32)
-    battery_store_cumulative_kw_min = np.zeros(row_count, dtype=np.float32)
-    grid_sell_kw = np.zeros(row_count, dtype=np.float32)
-    soc_kw_min = np.zeros(row_count, dtype=np.float32)
-    soc_fraction = np.zeros(row_count, dtype=np.float32)
-    soc_pct = np.zeros(row_count, dtype=np.float32)
-    discharge_cycle_count = np.zeros(row_count, dtype=np.float32)
-    charge_cycle_count = np.zeros(row_count, dtype=np.float32)
-    cum_charge_count = np.zeros(row_count, dtype=np.float32)
-    energy_sources_kw = np.zeros(row_count, dtype=np.float32)
-    energy_uses_kw = np.zeros(row_count, dtype=np.float32)
-    energy_losses_kw = np.zeros(row_count, dtype=np.float32)
-    identity_1_error_kw = np.zeros(row_count, dtype=np.float32)
+    cum_wind = np.cumsum(wind.astype(np_dtype))
+    cum_solar = np.cumsum(solar.astype(np_dtype))
+    cum_total = np.cumsum(total_generation.astype(np_dtype))
+
+    current_cycle = np.zeros(row_count, dtype=np_dtype)
+    cumulative_degradation = np.zeros(row_count, dtype=np_dtype)
+    capacity_now_kw_min = np.zeros(row_count, dtype=np_dtype)
+    excess_power_kw = np.zeros(row_count, dtype=np_dtype)
+    deficit_power_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_opening_kw_min = np.zeros(row_count, dtype=np_dtype)
+    battery_closing_kw_min = np.zeros(row_count, dtype=np_dtype)
+    battery_draw_required_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_draw_c_rate = np.zeros(row_count, dtype=np_dtype)
+    battery_draw_loss_rate = np.zeros(row_count, dtype=np_dtype)
+    battery_draw_loss_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_draw_final_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_draw_cumulative_kw_min = np.zeros(row_count, dtype=np_dtype)
+    grid_buy_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_store_available_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_store_c_rate = np.zeros(row_count, dtype=np_dtype)
+    battery_store_loss_rate = np.zeros(row_count, dtype=np_dtype)
+    battery_store_loss_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_store_final_kw = np.zeros(row_count, dtype=np_dtype)
+    battery_store_cumulative_kw_min = np.zeros(row_count, dtype=np_dtype)
+    grid_sell_kw = np.zeros(row_count, dtype=np_dtype)
+    soc_kw_min = np.zeros(row_count, dtype=np_dtype)
+    soc_fraction = np.zeros(row_count, dtype=np_dtype)
+    soc_pct = np.zeros(row_count, dtype=np_dtype)
+    discharge_cycle_count = np.zeros(row_count, dtype=np_dtype)
+    charge_cycle_count = np.zeros(row_count, dtype=np_dtype)
+    cum_charge_count = np.zeros(row_count, dtype=np_dtype)
+    energy_sources_kw = np.zeros(row_count, dtype=np_dtype)
+    energy_uses_kw = np.zeros(row_count, dtype=np_dtype)
+    energy_losses_kw = np.zeros(row_count, dtype=np_dtype)
+    identity_1_error_kw = np.zeros(row_count, dtype=np_dtype)
     identity_1_ok = np.zeros(row_count, dtype=np.int8)
-    bess_start_kw_min = np.zeros(row_count, dtype=np.float32)
-    bess_discharge_kw = np.zeros(row_count, dtype=np.float32)
-    bess_discharge_loss_kw = np.zeros(row_count, dtype=np.float32)
-    bess_charge_kw = np.zeros(row_count, dtype=np.float32)
-    bess_charge_loss_kw = np.zeros(row_count, dtype=np.float32)
-    bess_finish_kw_min = np.zeros(row_count, dtype=np.float32)
+    bess_start_kw_min = np.zeros(row_count, dtype=np_dtype)
+    bess_discharge_kw = np.zeros(row_count, dtype=np_dtype)
+    bess_discharge_loss_kw = np.zeros(row_count, dtype=np_dtype)
+    bess_charge_kw = np.zeros(row_count, dtype=np_dtype)
+    bess_charge_loss_kw = np.zeros(row_count, dtype=np_dtype)
+    bess_finish_kw_min = np.zeros(row_count, dtype=np_dtype)
+    identity_2_error_kw_min = np.zeros(row_count, dtype=np_dtype)
     identity_2_ok = np.zeros(row_count, dtype=np.int8)
 
     nominal_capacity_kw_min = float(config.capacity_kwh) * 60.0
@@ -382,7 +398,8 @@ def _simulate_section_accounting(
             + bess_charge_kw[index]
             - bess_charge_loss_kw[index]
         )
-        identity_2_ok[index] = int(abs(max(bess_finish_kw_min[index], 0.0) - battery_closing_kw_min[index]) <= IDENTITY_TOLERANCE)
+        identity_2_error_kw_min[index] = max(bess_finish_kw_min[index], 0.0) - battery_closing_kw_min[index]
+        identity_2_ok[index] = int(abs(identity_2_error_kw_min[index]) <= IDENTITY_TOLERANCE)
 
         prior_closing_kw_min = battery_closing_kw_min[index]
         prior_charge_count = cum_charge_count[index]
@@ -429,6 +446,7 @@ def _simulate_section_accounting(
         "bess_charge_kw": bess_charge_kw,
         "bess_charge_loss_kw": bess_charge_loss_kw,
         "bess_finish_kw_min": bess_finish_kw_min,
+        "identity_2_error_kw_min": identity_2_error_kw_min,
         "identity_2_ok": identity_2_ok,
     }
 

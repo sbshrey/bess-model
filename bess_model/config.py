@@ -62,6 +62,9 @@ class PreprocessingConfig:
     frequency: str = "1m"
     gap_fill: str = "linear_interpolate"
     max_interpolation_gap_minutes: int = 15
+    align_to_full_year: bool = True
+    simulation_dtype: str = "float32"
+    simulation_chunk_size: int | None = None
 
 
 @dataclass(frozen=True)

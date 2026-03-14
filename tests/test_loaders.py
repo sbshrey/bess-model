@@ -64,7 +64,7 @@ def _config_dict(solar_path: str, wind_path: str) -> dict[str, object]:
     return {
         "plant_name": "test_plant",
         "data": {"solar_path": solar_path, "wind_path": wind_path},
-        "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15},
+        "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15, "align_to_full_year": False},
         "grid": {"export_limit_kw": 1000.0, "import_limit_kw": None},
         "load": {"output_profile_kw": 400.0, "aux_consumption_kw": 20.0},
         "battery": {

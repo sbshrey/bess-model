@@ -35,7 +35,7 @@ def test_simulate_system_produces_expected_grid_flows(tmp_path) -> None:
         {
             "plant_name": "dispatch_case",
             "data": {"solar_path": str(solar_path), "wind_path": str(wind_path)},
-            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15},
+            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15, "align_to_full_year": False},
             "grid": {"export_limit_kw": 100.0, "import_limit_kw": None},
             "load": {"output_profile_kw": 400.0, "aux_consumption_kw": 20.0},
             "battery": {
@@ -69,7 +69,7 @@ def test_simulate_system_produces_expected_grid_flows(tmp_path) -> None:
     assert flows[1, "grid_buy_kw"] >= 0.0
     assert flows[2, "grid_buy_kw"] == pytest.approx(289.9, abs=1e-1)
     assert result.summary_metrics["max_identity_error_kw"] <= 1e-3
-    assert result.summary_metrics["grid_import_energy_kwh"] >= 0.0
+    assert result.summary_metrics["grid_import_kw_min"] >= 0.0
 
 
 def test_write_stage_outputs_writes_csv_for_each_stage(tmp_path) -> None:
@@ -95,7 +95,7 @@ def test_write_stage_outputs_writes_csv_for_each_stage(tmp_path) -> None:
         {
             "plant_name": "stage_dump_case",
             "data": {"solar_path": str(solar_path), "wind_path": str(wind_path)},
-            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15},
+            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15, "align_to_full_year": False},
             "grid": {"export_limit_kw": 100.0, "import_limit_kw": None},
             "load": {"output_profile_kw": 400.0, "aux_consumption_kw": 20.0},
             "battery": {

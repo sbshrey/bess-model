@@ -30,10 +30,28 @@ def test_align_generation_to_minute_interpolates_short_gaps_and_zero_fills_long_
     result = align_generation_to_minute(
         solar,
         wind,
-        PreprocessingConfig(max_interpolation_gap_minutes=3),
+        PreprocessingConfig(max_interpolation_gap_minutes=3, align_to_full_year=False, simulation_dtype="float64"),
     )
 
     assert result.filter(pl.col("timestamp") == datetime(2025, 1, 1, 0, 1))[0, "solar_kw"] == pytest.approx(60.0)
     assert result.filter(pl.col("timestamp") == datetime(2025, 1, 1, 0, 10))[0, "solar_kw"] == pytest.approx(0.0)
     assert result.filter(pl.col("timestamp") == datetime(2025, 1, 1, 0, 0))[0, "wind_kw"] == pytest.approx(0.0)
     assert result.filter(pl.col("timestamp") == datetime(2025, 1, 1, 0, 2))[0, "total_generation_kw"] == pytest.approx(320.0)
+
+
+def test_align_to_full_year_produces_525600_rows_for_non_leap_year() -> None:
+    """With align_to_full_year=True, aligned output has 525,600 timestamps (365*24*60)."""
+    solar = pl.DataFrame(
+        {"timestamp": [datetime(2025, 1, 1, 12, 0)], "solar_kw": [100.0]},
+    )
+    wind = pl.DataFrame(
+        {"timestamp": [datetime(2025, 6, 15, 12, 0)], "wind_kw": [50.0]},
+    )
+    result = align_generation_to_minute(
+        solar,
+        wind,
+        PreprocessingConfig(align_to_full_year=True),
+    )
+    assert result.height == 525_600
+    assert result["timestamp"].min() == datetime(2025, 1, 1, 0, 0, 0)
+    assert result["timestamp"].max() == datetime(2025, 12, 31, 23, 59, 0)

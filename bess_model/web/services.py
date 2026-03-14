@@ -134,10 +134,13 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
             else:
                 value = {}
         else:
+            # Parse boolean for align_to_full_year
+            if key == "preprocessing.align_to_full_year":
+                value = str(raw_value).lower() in ("true", "on", "1", "yes")
             # Parse numeric strings dynamically
-            if value.replace(".", "", 1).isdigit() and "." in value:
+            elif isinstance(value, str) and value.replace(".", "", 1).isdigit() and "." in value:
                 value = float(value)
-            elif value.isdigit():
+            elif isinstance(value, str) and value.isdigit():
                 value = int(value)
 
         parts = key.split(".")
@@ -214,6 +217,11 @@ def get_file_insights(relative_path: str | None) -> dict[str, str] | None:
             "description": "One-row KPIs aggregated from the minute-level flows.",
             "how": "Sums grid buy/sell, takes final SOC and capacity, counts identity failures.",
         },
+        "energy_table": {
+            "title": "Energy table",
+            "description": "Annual energy flows: SOURCES, USES, LOSS (kW-min).",
+            "how": "Sums solar, wind, BESS draw, grid import (sources); charge BESS, sell to grid, output (uses); discharge and charge losses.",
+        },
         "00_aligned_input": {
             "title": "Aligned input",
             "description": "Solar and wind generation aligned to a 1-minute grid.",
@@ -286,8 +294,8 @@ def get_file_insights(relative_path: str | None) -> dict[str, str] | None:
         },
         "14_identity_equation_2": {
             "title": "BESS state identity",
-            "description": "Checks battery state consistency.",
-            "how": "closing = start − discharge − loss + charge − loss. Validates internal bookkeeping.",
+            "description": "Checks battery state consistency. Includes identity_2_error_kw_min and battery_closing_kw_min for diagnostics.",
+            "how": "closing = start − discharge − loss + charge − loss. identity_2_ok = 1 when |bess_finish − battery_closing| ≤ tolerance.",
         },
     }
 
@@ -344,14 +352,41 @@ def choose_default_output_file(config: SimulationConfig, outputs: list[OutputFil
     return csv_outputs[0] if csv_outputs else outputs[0].relative_path
 
 
+@dataclass(frozen=True)
+class EnergyTableRow:
+    """One row in the energy balance table (SOURCES, USES, LOSS)."""
+
+    category: str
+    element: str
+    value_kw_min: float
+
+
+def load_energy_table(config: SimulationConfig) -> list[EnergyTableRow] | None:
+    """Load energy table from the latest simulation output when available."""
+    energy_path = Path(config.output_dir) / f"{config.plant_name}_energy_table.csv"
+    if not energy_path.exists():
+        return None
+    df = pl.read_csv(energy_path)
+    if df.height == 0:
+        return []
+    return [
+        EnergyTableRow(
+            category=str(row["category"]),
+            element=str(row["element"]),
+            value_kw_min=float(row.get("value_kw_min", row.get("value_kwh", 0) * 60)),
+        )
+        for row in df.to_dicts()
+    ]
+
+
 def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
-    """Load compact KPI cards from the latest summary output when available."""
+    """Load KPI cards from the latest summary output; all plant summary columns plus green section."""
     summary_path = Path(config.output_dir) / f"{config.plant_name}_summary.csv"
     if not summary_path.exists():
         return [
             MetricCard("Plant", config.plant_name, "Current configuration"),
             MetricCard("Export Limit", _format_number(config.grid.export_limit_kw), "kW"),
-            MetricCard("Battery", _format_number(config.battery.capacity_kwh), "kWh"),
+            MetricCard("Battery", _format_number(config.battery.capacity_kwh), "kWh (config)"),
             MetricCard("Outputs", str(len(list_output_files(config))), "Generated files"),
         ]
 
@@ -359,33 +394,57 @@ def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
     if summary_df.height == 0:
         return []
     row = summary_df.to_dicts()[0]
-    grid_import = float(row.get("grid_import_energy_kwh", 0.0))
-    grid_export = float(row.get("grid_export_energy_kwh", 0.0))
-    net_impact = grid_export - grid_import
-    impact_label = "Net Export" if net_impact >= 0 else "Net Import"
 
-    cycles = float(row.get("cumulative_charge_count", 0.0))
+    def _kw_min(val: str, kwh_fallback: str) -> float:
+        """Prefer kW-min column; fallback: convert kWh to kW-min (×60)."""
+        v = row.get(val)
+        if v is not None:
+            return float(v)
+        v = row.get(kwh_fallback)
+        return float(v) * 60.0 if v is not None else 0.0
 
-    final_capacity = float(row.get("final_degraded_capacity_kwh", config.battery.capacity_kwh))
-    soh_pct = (final_capacity / float(config.battery.capacity_kwh)) * 100.0 if float(config.battery.capacity_kwh) > 0 else 0.0
-
-    return [
+    cards: list[MetricCard] = [
+        MetricCard("Rows", _format_number(row.get("rows", 0), digits=0), "Minute rows"),
+        MetricCard("Grid Import", _format_number(_kw_min("grid_import_kw_min", "grid_import_energy_kwh")) + " kW-min", "Energy from grid"),
+        MetricCard("Grid Export", _format_number(_kw_min("grid_export_kw_min", "grid_export_energy_kwh")) + " kW-min", "Energy to grid"),
         MetricCard(
-            "Net Grid Impact",
-            f"{_format_number(abs(net_impact))} kWh",
-            impact_label,
+            "Degraded Capacity",
+            _format_number(_kw_min("final_degraded_capacity_kw_min", "final_degraded_capacity_kwh")) + " kW-min",
+            "Final battery capacity",
+        ),
+        MetricCard("Final SOC", _format_number(row.get("final_soc_pct", 0), digits=1) + "%", "State of charge"),
+        MetricCard(
+            "Cumulative Drawn",
+            _format_number(_kw_min("cumulative_drawn_kw_min", "cumulative_drawn_energy_kwh")) + " kW-min",
+            "Total from battery",
         ),
         MetricCard(
-            "Total Cycles",
-            _format_number(cycles, digits=1),
+            "Cumulative Stored",
+            _format_number(_kw_min("cumulative_stored_kw_min", "cumulative_stored_energy_kwh")) + " kW-min",
+            "Total to battery",
+        ),
+        MetricCard(
+            "Charge Count",
+            _format_number(row.get("cumulative_charge_count", 0), digits=1),
             "Equivalent full cycles",
         ),
+        MetricCard("Identity 1 Failures", str(row.get("identity_1_failures", 0)), "Energy balance violations"),
+        MetricCard("Identity 2 Failures", str(row.get("identity_2_failures", 0)), "BESS state violations"),
         MetricCard(
-            "Capacity Health (SOH)",
-            f"{_format_number(soh_pct, digits=1)}%",
-            f"{_format_number(final_capacity)} kWh remaining",
+            "Max Identity Error",
+            _format_number(row.get("max_identity_error_kw", 0)) + " kW",
+            "Identity 1 max error",
         ),
     ]
+    if "identity_2_max_error_kw_min" in row:
+        cards.append(
+            MetricCard(
+                "Identity 2 Max Error",
+                _format_number(row.get("identity_2_max_error_kw_min", 0)) + " kW-min",
+                "BESS state max error",
+            )
+        )
+    return cards
 
 
 def resolve_output_file(config: SimulationConfig, relative_path: str) -> Path:

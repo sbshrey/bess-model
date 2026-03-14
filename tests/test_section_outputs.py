@@ -86,7 +86,7 @@ def test_write_stage_outputs_writes_split_section_outputs(tmp_path) -> None:
             "plant_name": "section_outputs_case",
             "output_dir": str(tmp_path / "output"),
             "data": {"solar_path": str(solar_path), "wind_path": str(wind_path)},
-            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15},
+            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15, "align_to_full_year": False, "simulation_dtype": "float64"},
             "grid": {"export_limit_kw": 100.0, "import_limit_kw": None},
             "load": {"output_profile_kw": 40.0, "aux_consumption_kw": 10.0},
             "battery": {
@@ -124,7 +124,7 @@ def _section_config(
         {
             "plant_name": "section_test",
             "data": {"solar_path": "unused.csv", "wind_path": "unused.csv"},
-            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15},
+            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15, "align_to_full_year": False, "simulation_dtype": "float64"},
             "grid": {"export_limit_kw": 400.0, "import_limit_kw": None},
             "load": {"output_profile_kw": 400.0, "aux_consumption_kw": 20.0},
             "battery": {

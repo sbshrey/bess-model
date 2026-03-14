@@ -76,6 +76,8 @@ battery:
 | `frequency` | str | `"1m"` | Output resolution (1m = 1-minute) |
 | `gap_fill` | str | `"linear_interpolate"` | `linear_interpolate` or `zero` |
 | `max_interpolation_gap_minutes` | int | 15 | Max gap (minutes) to interpolate; larger gaps use zero fill |
+| `align_to_full_year` | bool | `true` | If true, aligned output spans full calendar year (525,600 or 527,040 rows); timestamps outside source data get zero fill |
+| `simulation_dtype` | str | `"float32"` | NumPy dtype for simulation arrays: `float32` (lower memory, ~50% less) or `float64` (higher precision). Use `float32` for Render/memory-limited environments |
 
 ### `grid` (GridConfig)
 

@@ -18,9 +18,17 @@ def align_generation_to_minute(
     solar_resampled = _resample_source(solar, "solar_kw", config)
     wind_resampled = _resample_source(wind, "wind_kw", config)
 
-    min_ts = min(solar_resampled["timestamp"].min(), wind_resampled["timestamp"].min())
-    max_ts = max(solar_resampled["timestamp"].max(), wind_resampled["timestamp"].max())
-    timeline = _minute_timeline(min_ts, max_ts, config.frequency)
+    if config.align_to_full_year:
+        min_ts = min(solar_resampled["timestamp"].min(), wind_resampled["timestamp"].min())
+        max_ts = max(solar_resampled["timestamp"].max(), wind_resampled["timestamp"].max())
+        year = min_ts.year if hasattr(min_ts, "year") else max_ts.year
+        start = datetime(year, 1, 1, 0, 0, 0)
+        end = datetime(year, 12, 31, 23, 59, 0)
+        timeline = _minute_timeline(start, end, config.frequency)
+    else:
+        min_ts = min(solar_resampled["timestamp"].min(), wind_resampled["timestamp"].min())
+        max_ts = max(solar_resampled["timestamp"].max(), wind_resampled["timestamp"].max())
+        timeline = _minute_timeline(min_ts, max_ts, config.frequency)
 
     combined = (
         timeline.join(solar_resampled, on="timestamp", how="left")

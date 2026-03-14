@@ -17,6 +17,7 @@ from bess_model.web.services import (
     choose_default_output_file,
     get_file_insights,
     list_output_files,
+    load_energy_table,
     load_metric_cards,
     load_config_text,
     load_csv_page,
@@ -87,6 +88,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         chart_cards = []
         date_filter = None
         metric_cards = load_metric_cards(config)
+        energy_table = load_energy_table(config)
 
         page = int(request.args.get("page", "1"))
         page_size = int(request.args.get("page_size", "20"))
@@ -125,6 +127,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             outputs=outputs,
             selected_file=selected,
             metric_cards=metric_cards,
+            energy_table=energy_table,
             plant_name=config.plant_name,
             output_dir=config.output_dir,
             preview_columns=preview_columns,

@@ -7,6 +7,8 @@ preprocessing:
   frequency: 1m
   gap_fill: zero
   max_interpolation_gap_minutes: 15
+  align_to_full_year: true
+  simulation_dtype: float64
 grid:
   export_limit_kw: 400.0
   import_limit_kw: ''

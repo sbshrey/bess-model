@@ -26,7 +26,7 @@ def test_pipeline_energy_balance_on_synthetic_minute_data() -> None:
         {
             "plant_name": "synthetic",
             "data": {"solar_path": "unused.csv", "wind_path": "unused.csv"},
-            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15},
+            "preprocessing": {"frequency": "1m", "gap_fill": "linear_interpolate", "max_interpolation_gap_minutes": 15, "align_to_full_year": False},
             "grid": {"export_limit_kw": 200.0, "import_limit_kw": 1000.0},
             "load": {"output_profile_kw": 300.0, "aux_consumption_kw": 0.0},
             "battery": {

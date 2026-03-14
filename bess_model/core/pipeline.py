@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,7 @@ def simulate_system(
 
     context._progress("Simulating", 15, f"Running section accounting ({minute_data.height} rows)")
     final_df = run_pipeline(minute_data, context, FLOW_STAGES)
+    gc.collect()
 
     context._progress("Summary", 90, "Computing summary metrics")
     metrics = compute_summary_metrics(final_df, config.plant_name)
@@ -96,31 +98,35 @@ def run_pipeline(
 
 
 def compute_summary_metrics(df: pl.DataFrame, plant_name: str) -> dict[str, float | int | str]:
-    """Aggregate minute-level section outputs into KPI metrics."""
+    """Aggregate minute-level section outputs into KPI metrics (values in kW-min for consistency)."""
     return {
         "plant_name": plant_name,
         "rows": df.height,
-        "grid_import_energy_kwh": _sum_kw_as_kwh(df, "grid_buy_kw"),
-        "grid_export_energy_kwh": _sum_kw_as_kwh(df, "grid_sell_kw"),
-        "final_degraded_capacity_kwh": float(df.select(pl.col("capacity_now_kw_min").tail(1)).item()) / 60.0,
+        "grid_import_kw_min": _sum_kw_min(df, "grid_buy_kw"),
+        "grid_export_kw_min": _sum_kw_min(df, "grid_sell_kw"),
+        "final_degraded_capacity_kw_min": float(df.select(pl.col("capacity_now_kw_min").tail(1)).item()),
         "final_soc_pct": float(df.select(pl.col("soc_fraction").tail(1)).item()) * 100.0,
-        "cumulative_drawn_energy_kwh": float(df.select(pl.col("battery_draw_cumulative_kw_min").tail(1)).item()) / 60.0,
-        "cumulative_stored_energy_kwh": float(df.select(pl.col("battery_store_cumulative_kw_min").tail(1)).item()) / 60.0,
+        "cumulative_drawn_kw_min": float(df.select(pl.col("battery_draw_cumulative_kw_min").tail(1)).item()),
+        "cumulative_stored_kw_min": float(df.select(pl.col("battery_store_cumulative_kw_min").tail(1)).item()),
         "cumulative_charge_count": float(df.select(pl.col("cum_charge_count").tail(1)).item()),
         "identity_1_failures": int(df.select((1 - pl.col("identity_1_ok")).sum()).item()),
         "identity_2_failures": int(df.select((1 - pl.col("identity_2_ok")).sum()).item()),
         "max_identity_error_kw": float(df.select(pl.col("identity_1_error_kw").abs().max()).item()),
+        "identity_2_max_error_kw_min": float(df.select(pl.col("identity_2_error_kw_min").abs().max()).item()),
     }
 
 
 def write_simulation_outputs(result: SimulationResult, output_dir: str | Path, stem: str) -> tuple[Path, Path]:
-    """Persist minute-level flows and summary metrics."""
+    """Persist minute-level flows, summary metrics, and energy table."""
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     parquet_path = target_dir / f"{stem}_minute_flows.parquet"
     metrics_path = target_dir / f"{stem}_summary.csv"
+    energy_table_path = target_dir / f"{stem}_energy_table.csv"
     result.minute_flows.write_parquet(parquet_path)
     pl.DataFrame([result.summary_metrics]).write_csv(metrics_path)
+    energy_rows = compute_energy_table(result.minute_flows)
+    pl.DataFrame(energy_rows).write_csv(energy_table_path)
     return parquet_path, metrics_path
 
 
@@ -145,5 +151,31 @@ def write_stage_outputs(
     return written_paths
 
 
-def _sum_kw_as_kwh(df: pl.DataFrame, column: str) -> float:
-    return float(df.select((pl.col(column) / 60.0).sum()).item())
+def _sum_kw_min(df: pl.DataFrame, column: str) -> float:
+    """Sum power (kW) over minutes to get energy in kW-min."""
+    return float(df.select(pl.col(column).sum()).item())
+
+
+def compute_energy_table(df: pl.DataFrame) -> list[dict[str, str | float]]:
+    """Compute annual energy flows for SOURCES, USES, and LOSS (kW-min)."""
+    rows: list[dict[str, str | float]] = []
+
+    def add(category: str, element: str, value_kw_min: float) -> None:
+        rows.append({"category": category, "element": element, "value_kw_min": value_kw_min})
+
+    # SOURCES
+    add("SOURCES", "Solar Power", _sum_kw_min(df, "solar_kw"))
+    add("SOURCES", "Wind Power", _sum_kw_min(df, "wind_kw"))
+    add("SOURCES", "Draw from BESS", _sum_kw_min(df, "battery_draw_final_kw"))
+    add("SOURCES", "Draw from GRID", _sum_kw_min(df, "grid_buy_kw"))
+
+    # USES
+    add("USES", "Charge BESS", _sum_kw_min(df, "battery_store_final_kw"))
+    add("USES", "Sell to GRID", _sum_kw_min(df, "grid_sell_kw"))
+    add("USES", "Output (O/p)", _sum_kw_min(df, "total_consumption_kw"))
+
+    # LOSS
+    add("LOSS", "Discharge Loss", _sum_kw_min(df, "battery_draw_loss_kw"))
+    add("LOSS", "Charge Loss", _sum_kw_min(df, "battery_store_loss_kw"))
+
+    return rows

@@ -52,16 +52,37 @@ With `--dump-sections`, the pipeline writes these CSVs:
 |--------|-------------|
 | `plant_name` | Config plant name |
 | `rows` | Number of minute rows |
-| `grid_import_energy_kwh` | Total grid buy |
-| `grid_export_energy_kwh` | Total grid sell |
-| `final_degraded_capacity_kwh` | End-of-run capacity |
+| `grid_import_kw_min` | Total grid buy |
+| `grid_export_kw_min` | Total grid sell |
+| `final_degraded_capacity_kw_min` | End-of-run capacity |
 | `final_soc_pct` | Final SOC % |
-| `cumulative_drawn_energy_kwh` | Total energy drawn from battery |
-| `cumulative_stored_energy_kwh` | Total energy stored |
+| `cumulative_drawn_kw_min` | Total energy drawn from battery |
+| `cumulative_stored_kw_min` | Total energy stored |
 | `cumulative_charge_count` | Equivalent full cycles |
 | `identity_1_failures` | Energy balance violations |
 | `identity_2_failures` | BESS state violations |
 | `max_identity_error_kw` | Max identity 1 error |
+| `identity_2_max_error_kw_min` | Max identity 2 error (BESS state) |
+
+## Factors Leading to Grid Import Minimization
+
+Several configuration and data factors influence how much energy is imported from the grid:
+
+- **Battery capacity** — Larger capacity stores more surplus generation and reduces reliance on the grid during deficit minutes.
+- **Battery power (C-rate)** — Higher nominal power allows faster charge and discharge, improving peak shaving and responsiveness to excess/deficit.
+- **Generation–load match** — Solar and wind profiles aligned with consumption reduce deficit minutes and the need for grid import.
+- **Initial SOC** — Higher starting SOC provides more discharge headroom in early hours, delaying the first grid import.
+- **Degradation and loss tables** — Lower losses and degradation preserve usable energy; higher losses reduce effective throughput.
+- **Output profile** — Lower base load (output_profile_kw + aux_consumption_kw) reduces deficit magnitude.
+
+## Optimal Battery Utilization
+
+Optimal battery utilization balances cycle throughput with cycle life:
+
+- **Definition** — Balance between energy throughput (charge/discharge cycles) and capacity retention (degradation over time).
+- **Trade-off** — More cycling reduces grid import but accelerates capacity loss; less cycling preserves capacity but increases grid dependence.
+- **Indicators** — `cumulative_charge_count`, `final_degraded_capacity_kwh`, and SOH % (capacity health) in the summary metrics.
+- **Practical guidance** — Sizing for 90% profile coverage often yields a better cost/benefit than 100% coverage. Consider battery replacement when SOH falls below ~70% (per project notes).
 
 ## Output Artifacts
 
@@ -69,6 +90,7 @@ With `--dump-sections`, the pipeline writes these CSVs:
 |------|---------|
 | `{plant}_minute_flows.parquet` | Full minute-level DataFrame |
 | `{plant}_summary.csv` | One-row summary metrics |
+| `{plant}_energy_table.csv` | Annual energy flows (SOURCES, USES, LOSS) in kW-min |
 | `{plant}_sections/` | Section CSVs (when `--dump-sections`) |
 
 ## Units and Conventions
