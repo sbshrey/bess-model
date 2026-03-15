@@ -26,7 +26,7 @@ from bess_model.core.pipeline import (
 from bess_model.config import SizingConfig
 from bess_model.flows.section_outputs import write_section_outputs
 from bess_model.results import SimulationResult
-from bess_model.sizing import run_sizing_sweep, select_optimal
+from bess_model.sizing import run_auto_sizing, run_sizing_sweep, select_optimal
 
 
 
@@ -120,12 +120,15 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
 
     # Keys that need special parsing
     skip_keys = {"config_text", "recalculate", "page", "page_size", "start_date", "end_date", "file"}
-    bool_keys = {"preprocessing.align_to_full_year", "sizing.enabled"}
+    bool_keys = {"preprocessing.align_to_full_year", "sizing.enabled", "sizing.auto_sizing"}
     list_float_keys = {"sizing.capacities_kwh"}
     nullable_float_keys = {
         "grid.import_limit_kw",
         "sizing.constraints.min_self_consumption_pct",
         "sizing.constraints.max_cycles_per_year",
+        "sizing.capacity_min_kwh",
+        "sizing.capacity_max_kwh",
+        "sizing.target_self_consumption_pct",
     }
 
     for key, raw_value in form_data.items():
@@ -437,8 +440,13 @@ def run_sizing_with_progress(
     if not sizing.enabled:
         sizing = SizingConfig(capacities_kwh=sizing.capacities_kwh)
 
-    progress_cb("Sizing sweep", 0, f"Running {len(sizing.capacities_kwh)} capacities")
-    results = run_sizing_sweep(config, sizing.capacities_kwh, progress_callback=progress_cb)
+    use_auto = sizing.auto_sizing and sizing.capacity_min_kwh is not None and sizing.capacity_max_kwh is not None
+    if use_auto:
+        progress_cb("Sizing sweep", 0, "Auto sizing: finding optimal capacity range")
+        results = run_auto_sizing(config, progress_callback=progress_cb)
+    else:
+        progress_cb("Sizing sweep", 0, f"Running {len(sizing.capacities_kwh)} capacities")
+        results = run_sizing_sweep(config, sizing.capacities_kwh, progress_callback=progress_cb)
     constraints = {}
     if sizing.min_self_consumption_pct is not None:
         constraints["min_self_consumption_pct"] = sizing.min_self_consumption_pct
@@ -929,6 +937,123 @@ def _chart_card(
 ) -> ChartCard:
     svg = build_chart_svg_from_df(df, columns, x_column=x_column) or ""
     return ChartCard(title=title, subtitle=subtitle, svg=svg)
+
+
+def _inject_recommended_marker(
+    svg: str,
+    x_val: float,
+    y_val: float,
+    x_min: float,
+    x_max: float,
+    y_max: float,
+    width: int = 1100,
+    height: int = 380,
+) -> str:
+    """Insert a circle marker at (x_val, y_val) in chart data space into the SVG."""
+    left_padding = 66
+    right_padding = 18
+    top_padding = 40
+    bottom_padding = 46
+    chart_width = width - left_padding - right_padding
+    chart_height = height - top_padding - bottom_padding
+    x_span = max(x_max - x_min, 1.0)
+    x_px = left_padding + ((x_val - x_min) / x_span) * chart_width
+    y_px = height - bottom_padding - ((float(y_val) / max(y_max, 1.0)) * chart_height)
+    marker = (
+        f'<circle cx="{x_px:.2f}" cy="{y_px:.2f}" r="10" fill="none" stroke="#e11d48" stroke-width="3" '
+        f'aria-label="Recommended capacity" />'
+        f'<circle cx="{x_px:.2f}" cy="{y_px:.2f}" r="4" fill="#e11d48" aria-label="Recommended" />'
+    )
+    if "</svg>" in svg:
+        return svg.replace("</svg>", f"{marker}</svg>")
+    return svg
+
+
+def build_sizing_chart_cards(sizing_results: list[dict[str, Any]]) -> list[ChartCard]:
+    """Build two chart cards (grid import and self-consumption vs capacity) with recommended point marked."""
+    if not sizing_results:
+        return []
+    required = {"capacity_kwh", "grid_import_kw_min", "self_consumption_pct"}
+    if not required.issubset(set(sizing_results[0].keys())):
+        return []
+    df = pl.DataFrame(sizing_results)
+    # Recommended may be bool or string "true"/"false" from CSV
+    if "recommended" not in df.columns:
+        rec_idx = None
+    else:
+        rec_str = pl.col("recommended").cast(pl.Utf8).str.to_lowercase()
+        rec_rows = df.filter(
+            (pl.col("recommended") == True)  # noqa: E712
+            | (rec_str == "true")
+            | (rec_str == "1")
+        )
+        rec_idx = rec_rows.row(0, named=True) if rec_rows.height > 0 else None
+
+    cards: list[ChartCard] = []
+    width, height = 1100, 380
+
+    # Chart 1: Grid import vs capacity
+    svg1 = build_chart_svg_from_df(
+        df,
+        preferred_columns=["grid_import_kw_min"],
+        x_column="capacity_kwh",
+        width=width,
+        height=height,
+    )
+    if svg1 and rec_idx is not None:
+        x_min = df["capacity_kwh"].min()
+        x_max = df["capacity_kwh"].max()
+        y_max = float(df["grid_import_kw_min"].max() or 1)
+        svg1 = _inject_recommended_marker(
+            svg1,
+            rec_idx["capacity_kwh"],
+            rec_idx["grid_import_kw_min"],
+            x_min,
+            x_max,
+            y_max,
+            width,
+            height,
+        )
+    if svg1:
+        cards.append(
+            ChartCard(
+                "Grid import vs battery capacity",
+                "Lower is better. Recommended point marked.",
+                svg1,
+            )
+        )
+
+    # Chart 2: Self-consumption % vs capacity
+    svg2 = build_chart_svg_from_df(
+        df,
+        preferred_columns=["self_consumption_pct"],
+        x_column="capacity_kwh",
+        width=width,
+        height=height,
+    )
+    if svg2 and rec_idx is not None:
+        x_min = df["capacity_kwh"].min()
+        x_max = df["capacity_kwh"].max()
+        y_max = float(df["self_consumption_pct"].max() or 1)
+        svg2 = _inject_recommended_marker(
+            svg2,
+            rec_idx["capacity_kwh"],
+            rec_idx["self_consumption_pct"],
+            x_min,
+            x_max,
+            y_max,
+            width,
+            height,
+        )
+    if svg2:
+        cards.append(
+            ChartCard(
+                "Self-consumption vs battery capacity",
+                "Higher is better. Recommended point marked.",
+                svg2,
+            )
+        )
+    return cards
 
 
 def _format_number(value: Any, digits: int = 2) -> str:

@@ -16,7 +16,7 @@ from bess_model.core.pipeline import (
     write_simulation_outputs,
     write_stage_outputs,
 )
-from bess_model.sizing import run_sizing_sweep, select_optimal
+from bess_model.sizing import run_auto_sizing, run_sizing_sweep, select_optimal
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -65,9 +65,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         def _progress(stage: str, pct: float, detail: str) -> None:
             logging.info("%s: %.0f%% - %s", stage, pct, detail)
 
-        results = run_sizing_sweep(
-            config, sizing.capacities_kwh, progress_callback=_progress
-        )
+        use_auto = sizing.auto_sizing and sizing.capacity_min_kwh is not None and sizing.capacity_max_kwh is not None
+        if use_auto:
+            results = run_auto_sizing(config, progress_callback=_progress)
+        else:
+            results = run_sizing_sweep(
+                config, sizing.capacities_kwh, progress_callback=_progress
+            )
         constraints = {}
         if sizing.min_self_consumption_pct is not None:
             constraints["min_self_consumption_pct"] = sizing.min_self_consumption_pct

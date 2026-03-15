@@ -104,7 +104,18 @@
                 <option value="false" {% if not config.sizing or not config.sizing.enabled %}selected{% endif %}>No</option>
               </select>
             </label>
-            <label>Capacities (kWh) <input type="text" name="sizing.capacities_kwh" value="{{ config.sizing.capacities_kwh | join(', ') if config.sizing else '500, 750, 1000, 1250, 1500' }}" class="input-field" placeholder="500, 750, 1000, 1250, 1500"></label>
+            <label>Auto sizing (find optimal capacity automatically)
+              <select name="sizing.auto_sizing" class="input-field" id="sizing-auto-sizing">
+                <option value="false" {% if not config.sizing or not config.sizing.auto_sizing %}selected{% endif %}>No</option>
+                <option value="true" {% if config.sizing and config.sizing.auto_sizing %}selected{% endif %}>Yes</option>
+              </select>
+            </label>
+            <label>Capacity min (kWh) <input type="number" step="any" name="sizing.capacity_min_kwh" value="{{ config.sizing.capacity_min_kwh if config.sizing and config.sizing.capacity_min_kwh is not none else '' }}" class="input-field sizing-auto-field" placeholder="e.g. 500 (for auto)"></label>
+            <label>Capacity max (kWh) <input type="number" step="any" name="sizing.capacity_max_kwh" value="{{ config.sizing.capacity_max_kwh if config.sizing and config.sizing.capacity_max_kwh is not none else '' }}" class="input-field sizing-auto-field" placeholder="e.g. 50000 (for auto)"></label>
+            <label>Max simulations (auto) <input type="number" min="3" name="sizing.auto_max_simulations" value="{{ config.sizing.auto_max_simulations if config.sizing else 15 }}" class="input-field sizing-auto-field" placeholder="15"></label>
+            <label>Improvement threshold (%) <input type="number" step="any" name="sizing.improvement_threshold_pct" value="{{ config.sizing.improvement_threshold_pct if config.sizing else 1.0 }}" class="input-field sizing-auto-field" placeholder="1.0 (knee detection)"></label>
+            <label>Target self-consumption % (optional) <input type="number" step="any" name="sizing.target_self_consumption_pct" value="{{ config.sizing.target_self_consumption_pct if config.sizing and config.sizing.target_self_consumption_pct is not none else '' }}" class="input-field sizing-auto-field" placeholder="e.g. 90 (find smallest cap that meets this)"></label>
+            <label>Capacities (kWh) <input type="text" name="sizing.capacities_kwh" value="{{ config.sizing.capacities_kwh | join(', ') if config.sizing else '500, 750, 1000, 1250, 1500' }}" class="input-field" placeholder="500, 750, 1000, 1250, 1500" title="Used when Auto sizing is No"></label>
             <label>Objective
               <select name="sizing.objective" class="input-field">
                 <option value="min_grid_import_then_smallest" {% if config.sizing and config.sizing.objective == 'min_grid_import_then_smallest' %}selected{% endif %}>Minimize grid import, then smallest</option>

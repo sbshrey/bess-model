@@ -74,6 +74,19 @@
           </tbody>
         </table>
       </div>
+      {% if sizing_chart_cards %}
+      <div class="chart-grid output-chart-grid sizing-chart-grid">
+        {% for chart in sizing_chart_cards %}
+        <article class="chart-card chart-card-large">
+          <div class="chart-card-head">
+            <div><h3>{{ chart.title }}</h3><p>{{ chart.subtitle }}</p></div>
+            <button type="button" class="button button-ghost button-small" data-chart-open data-chart-title="{{ chart.title }}" data-chart-subtitle="{{ chart.subtitle }}">Expand</button>
+          </div>
+          <div class="chart-wrap chart-wrap-large">{{ chart.svg|safe }}</div>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
     </section>
     {% endif %}
   </div>

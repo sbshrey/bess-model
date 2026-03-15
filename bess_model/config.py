@@ -92,6 +92,13 @@ class SizingConfig:
     objective: str = "min_grid_import_then_smallest"
     min_self_consumption_pct: float | None = None
     max_cycles_per_year: float | None = None
+    # Auto sizing: numerical search instead of fixed list
+    auto_sizing: bool = False
+    capacity_min_kwh: float | None = None
+    capacity_max_kwh: float | None = None
+    auto_max_simulations: int = 15
+    improvement_threshold_pct: float = 1.0
+    target_self_consumption_pct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -285,12 +292,25 @@ def _normalize_sizing_payload(payload: dict[str, Any] | None) -> SizingConfig | 
     constraints = payload.get("constraints") or {}
     min_sc = constraints.get("min_self_consumption_pct")
     max_cy = constraints.get("max_cycles_per_year")
+    auto = bool(payload.get("auto_sizing", False))
+    cap_min = payload.get("capacity_min_kwh")
+    cap_max = payload.get("capacity_max_kwh")
     return SizingConfig(
         enabled=bool(payload.get("enabled", True)),
         capacities_kwh=capacities,
         objective=str(payload.get("objective", "min_grid_import_then_smallest")),
         min_self_consumption_pct=float(min_sc) if min_sc is not None else None,
         max_cycles_per_year=float(max_cy) if max_cy is not None else None,
+        auto_sizing=auto,
+        capacity_min_kwh=float(cap_min) if cap_min is not None else None,
+        capacity_max_kwh=float(cap_max) if cap_max is not None else None,
+        auto_max_simulations=int(payload.get("auto_max_simulations", 15)),
+        improvement_threshold_pct=float(payload.get("improvement_threshold_pct", 1.0)),
+        target_self_consumption_pct=(
+            float(payload.get("target_self_consumption_pct"))
+            if payload.get("target_self_consumption_pct") is not None
+            else None
+        ),
     )
 
 
