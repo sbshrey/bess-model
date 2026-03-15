@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv as csv_module
 import gc
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,23 +196,38 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
     return result
 
 
+# Chunk size for writing section CSVs to limit peak memory (float64: ~50k rows ≈ tens of MB per chunk)
+SECTION_WRITE_CHUNK_ROWS = 50_000
+
+
 def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
-    """Write one CSV per section."""
+    """Write one CSV per section, in row chunks to keep memory low (float64-friendly)."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_paths: list[Path] = []
+    n_rows = df.height
 
     # Generic base columns we want visible on all exported sections
     base_columns = ["timestamp", "wind_kw", "solar_kw", "total_generation_kw"]
 
     for section in OUTPUT_SECTIONS:
-        # Resolve target columns ensuring we don't duplicate explicitly requested bases
         explicit_columns = [col for col in section.columns if col not in base_columns]
         target_columns = base_columns + explicit_columns
+        # Only include columns that exist in df (e.g. 00_aligned_input has no section columns)
+        available = [c for c in target_columns if c in df.columns]
+        if not available:
+            continue
 
-        subset = df.select(target_columns)
         file_path = target_dir / section.file_name
-        subset.write_csv(file_path)
+        with file_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv_module.writer(f)
+            writer.writerow(available)
+            for start in range(0, n_rows, SECTION_WRITE_CHUNK_ROWS):
+                chunk = df.slice(start, SECTION_WRITE_CHUNK_ROWS).select(available)
+                for row in chunk.iter_rows():
+                    writer.writerow(row)
         written_paths.append(file_path)
+        gc.collect()
+
     return written_paths
 
 

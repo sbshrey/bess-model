@@ -189,7 +189,7 @@ def run_simulation_from_frontend(config_path: Path) -> tuple[SimulationConfig, S
     config = SimulationConfig.from_yaml(config_path)
     result = simulate_system(config)
     write_simulation_outputs(result, config.output_dir, config.plant_name)
-    stage_paths = _write_stage_snapshots(config)
+    stage_paths = _write_stage_snapshots(config, result=result)
     return config, result, stage_paths
 
 def run_simulation_from_form_frontend(config_path: Path, form_data: dict[str, str]) -> tuple[SimulationConfig, SimulationResult, list[Path]]:
@@ -220,7 +220,7 @@ def run_simulation_with_progress(
     write_simulation_outputs(result, config.output_dir, config.plant_name)
 
     progress_cb("Writing sections", 96, "Writing section CSVs")
-    _write_stage_snapshots(config)
+    _write_stage_snapshots(config, result=result)
 
     progress_cb("Done", 100, f"Completed {result.summary_metrics['rows']} rows")
     return config, result, []
@@ -1073,20 +1073,56 @@ def normalize_date_input(value: str | None) -> str:
         return ""
 
 
-def _write_stage_snapshots(config: SimulationConfig) -> list[Path]:
-    """Write aligned input and each section CSV once."""
-    aligned_input, context = load_aligned_inputs(config)
+def _write_stage_snapshots(
+    config: SimulationConfig,
+    result: SimulationResult | None = None,
+) -> list[Path]:
+    """Write aligned input and each section CSV once. Uses existing result if provided to avoid re-running and OOM with float64."""
     section_dir = Path(config.output_dir) / f"{config.plant_name}_sections"
     section_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
 
-    written = [section_dir / "00_aligned_input.csv"]
-    aligned_input.write_csv(written[0])
+    if result is not None:
+        # Use already-computed minute_flows: write 00 from input columns, then section CSVs in chunks (avoids re-run + OOM)
+        df = result.minute_flows
+        aligned_cols = [c for c in ("timestamp", "wind_kw", "solar_kw", "total_generation_kw") if c in df.columns]
+        if aligned_cols:
+            input_path = section_dir / "00_aligned_input.csv"
+            _write_csv_chunked(df, input_path, columns=aligned_cols)
+            written.append(input_path)
+        written.extend(write_section_outputs(df, section_dir))
+        return written
+
+    # Legacy path: load and run pipeline (e.g. recalculate from edited CSV)
+    aligned_input, context = load_aligned_inputs(config)
+    input_path = section_dir / "00_aligned_input.csv"
+    _write_csv_chunked(aligned_input, input_path)
+    written.append(input_path)
 
     result_df = aligned_input
     for stage in FLOW_STAGES:
         result_df = stage(result_df, context)
     written.extend(write_section_outputs(result_df, section_dir))
     return written
+
+
+def _write_csv_chunked(
+    df: pl.DataFrame,
+    path: Path,
+    chunk_rows: int = 50_000,
+    columns: list[str] | None = None,
+) -> None:
+    """Write a DataFrame to CSV in row chunks to limit peak memory (no full-frame select)."""
+    cols = columns or df.columns
+    cols = [c for c in cols if c in df.columns]
+    n_rows = df.height
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(cols)
+        for start in range(0, n_rows, chunk_rows):
+            chunk = df.slice(start, chunk_rows).select(cols)
+            for row in chunk.iter_rows():
+                writer.writerow(row)
 
 
 def _detect_timestamp_column(df: pl.DataFrame) -> str | None:
