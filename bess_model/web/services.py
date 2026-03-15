@@ -219,8 +219,8 @@ def run_simulation_with_progress(
     progress_cb("Writing outputs", 92, "Writing Parquet and summary")
     write_simulation_outputs(result, config.output_dir, config.plant_name)
 
-    progress_cb("Writing sections", 96, "Writing section CSVs")
-    _write_stage_snapshots(config, result=result)
+    progress_cb("Writing sections", 92, "Writing section CSVs")
+    _write_stage_snapshots(config, result=result, progress_callback=progress_cb)
 
     progress_cb("Done", 100, f"Completed {result.summary_metrics['rows']} rows")
     return config, result, []
@@ -1076,6 +1076,7 @@ def normalize_date_input(value: str | None) -> str:
 def _write_stage_snapshots(
     config: SimulationConfig,
     result: SimulationResult | None = None,
+    progress_callback: Callable[[str, float, str], None] | None = None,
 ) -> list[Path]:
     """Write aligned input and each section CSV once. Uses existing result if provided to avoid re-running and OOM with float64."""
     section_dir = Path(config.output_dir) / f"{config.plant_name}_sections"
@@ -1087,13 +1088,19 @@ def _write_stage_snapshots(
         df = result.minute_flows
         aligned_cols = [c for c in ("timestamp", "wind_kw", "solar_kw", "total_generation_kw") if c in df.columns]
         if aligned_cols:
+            if progress_callback:
+                progress_callback("Writing sections", 93.0, "Writing 00_aligned_input.csv")
             input_path = section_dir / "00_aligned_input.csv"
             _write_csv_chunked(df, input_path, columns=aligned_cols)
             written.append(input_path)
-        written.extend(write_section_outputs(df, section_dir))
+        written.extend(
+            write_section_outputs(df, section_dir, progress_callback=progress_callback)
+        )
         return written
 
     # Legacy path: load and run pipeline (e.g. recalculate from edited CSV)
+    if progress_callback:
+        progress_callback("Writing sections", 93.0, "Writing 00_aligned_input.csv")
     aligned_input, context = load_aligned_inputs(config)
     input_path = section_dir / "00_aligned_input.csv"
     _write_csv_chunked(aligned_input, input_path)

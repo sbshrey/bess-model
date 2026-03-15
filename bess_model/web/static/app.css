@@ -1201,7 +1201,8 @@ tbody tr:hover {
 /* ── Config Tab ── */
 
 .config-tab .config-panel {
-  max-width: 960px;
+  width: 100%;
+  max-width: none;
 }
 
 .config-panel-header {
@@ -1218,9 +1219,10 @@ tbody tr:hover {
 
 .config-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
   margin-top: 16px;
+  width: 100%;
 }
 
 .form-section-group {

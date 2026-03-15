@@ -200,7 +200,13 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
 SECTION_WRITE_CHUNK_ROWS = 50_000
 
 
-def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
+def write_section_outputs(
+    df: pl.DataFrame,
+    target_dir: Path,
+    progress_callback: Callable[[str, float, str], None] | None = None,
+    progress_pct_start: float = 94.0,
+    progress_pct_end: float = 99.0,
+) -> list[Path]:
     """Write one CSV per section, in row chunks to keep memory low (float64-friendly)."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_paths: list[Path] = []
@@ -209,13 +215,17 @@ def write_section_outputs(df: pl.DataFrame, target_dir: Path) -> list[Path]:
     # Generic base columns we want visible on all exported sections
     base_columns = ["timestamp", "wind_kw", "solar_kw", "total_generation_kw"]
 
-    for section in OUTPUT_SECTIONS:
+    for i, section in enumerate(OUTPUT_SECTIONS):
         explicit_columns = [col for col in section.columns if col not in base_columns]
         target_columns = base_columns + explicit_columns
-        # Only include columns that exist in df (e.g. 00_aligned_input has no section columns)
         available = [c for c in target_columns if c in df.columns]
         if not available:
             continue
+
+        if progress_callback:
+            n_total = len(OUTPUT_SECTIONS)
+            pct = progress_pct_start + (progress_pct_end - progress_pct_start) * ((i + 1) / n_total)
+            progress_callback("Writing sections", pct, f"Writing {section.file_name}")
 
         file_path = target_dir / section.file_name
         with file_path.open("w", newline="", encoding="utf-8") as f:
