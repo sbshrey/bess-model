@@ -397,12 +397,9 @@
   };
 
   const initializeInteractiveCharts = () => {
-    const panel = document.querySelector(".dashboard-chart-panel");
     const modal = document.querySelector("[data-chart-modal]");
     const modalCanvas = modal?.querySelector("[data-chart-modal-canvas]");
     const modalTitleElement = modal?.querySelector("[data-chart-modal-title]");
-
-    if (!panel) return;
 
     let isDragging = false;
     let startX = 0;
@@ -438,8 +435,8 @@
       brushGroup.style.width = `${width}px`;
     });
 
-    const fetchAndRenderCharts = async (url) => {
-       const chartGrid = panel.querySelector(".dashboard-chart-grid");
+    const fetchAndRenderCharts = async (url, container) => {
+       const chartGrid = container?.querySelector(".dashboard-chart-grid, .output-chart-grid, [data-chart-grid]");
        if (chartGrid) chartGrid.style.opacity = "0.5";
        if (modalCanvas && !modal.hidden) modalCanvas.style.opacity = "0.5";
        const isZoomed = url.includes("start_date=");
@@ -453,7 +450,7 @@
          let newHtml = "";
          for (const card of cards) {
             newHtml += `
-             <article class="chart-card">
+             <article class="chart-card chart-card-large">
                <div class="chart-card-head">
                  <div>
                    <h3>${card.title}</h3>
@@ -461,7 +458,7 @@
                  </div>
                  <button type="button" class="button button-ghost button-small" data-chart-open data-chart-title="${card.title}" data-chart-subtitle="${card.subtitle}">Expand</button>
                </div>
-               <div class="chart-wrap">
+               <div class="chart-wrap chart-wrap-large">
                   ${resetBtnHtml}
                   ${card.svg}
                </div>
@@ -510,13 +507,14 @@
       const xMax = parseFloat(svg.getAttribute("data-x-max"));
       if (isNaN(xMin) || isNaN(xMax)) return;
 
-      const scaleX = 720 / rect.width;
+      const svgWidth = parseFloat(svg.getAttribute("data-chart-width")) || 720;
+      const scaleX = svgWidth / rect.width;
       const svgLeft = left * scaleX;
       const svgRight = right * scaleX;
 
       const leftPadding = 66;
       const rightPadding = 18;
-      const chartWidth = 720 - leftPadding - rightPadding;
+      const chartWidth = svgWidth - leftPadding - rightPadding;
 
       let propStart = (svgLeft - leftPadding) / chartWidth;
       let propEnd = (svgRight - leftPadding) / chartWidth;
@@ -534,26 +532,200 @@
       const s1 = `${d1.getFullYear()}-${pad(d1.getMonth()+1)}-${pad(d1.getDate())} ${pad(d1.getHours())}:${pad(d1.getMinutes())}:${pad(d1.getSeconds())}`;
       const s2 = `${d2.getFullYear()}-${pad(d2.getMonth()+1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}:${pad(d2.getSeconds())}`;
 
-      const filePath = panel.getAttribute("data-file-path");
+      const container = wrap.closest(".dashboard-chart-panel, .output-charts-content");
+      const filePath = container?.getAttribute("data-file-path");
       if (!filePath) return;
 
       const url = `/api/render-charts/${encodeURIComponent(filePath)}?start_date=${encodeURIComponent(s1)}&end_date=${encodeURIComponent(s2)}`;
-      await fetchAndRenderCharts(url);
+      await fetchAndRenderCharts(url, container);
     });
 
     document.addEventListener("click", async (e) => {
-       if (e.target.closest(".reset-zoom-btn")) {
-          const filePath = panel.getAttribute("data-file-path");
+       const resetBtn = e.target.closest(".reset-zoom-btn");
+       if (resetBtn) {
+          const wrap = resetBtn.closest(".chart-wrap");
+          const container = wrap?.closest(".dashboard-chart-panel, .output-charts-content");
+          const filePath = container?.getAttribute("data-file-path");
           if (!filePath) return;
           const url = `/api/render-charts/${encodeURIComponent(filePath)}`;
-          await fetchAndRenderCharts(url);
+          await fetchAndRenderCharts(url, container);
        }
     });
   };
 
+  const initializeRunSizing = () => {
+    document.querySelectorAll("[data-run-sizing]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (document.querySelector(".simulation-loading")) return;
+
+        const configForm = btn.closest("main")?.querySelector("#config-form-full, form.config-visual-form");
+        const formData = configForm ? new FormData(configForm) : null;
+
+        const overlay = document.createElement("div");
+        overlay.className = "simulation-loading";
+        overlay.setAttribute("role", "status");
+        overlay.setAttribute("aria-live", "polite");
+
+        const barWrap = document.createElement("div");
+        barWrap.className = "simulation-loading-bar";
+        const barFill = document.createElement("span");
+        barFill.className = "simulation-loading-bar-fill";
+        barWrap.appendChild(barFill);
+        overlay.appendChild(barWrap);
+
+        const card = document.createElement("div");
+        card.className = "simulation-loading-card";
+        const stageEl = document.createElement("p");
+        stageEl.className = "simulation-loading-text";
+        stageEl.textContent = "Starting sizing sweep…";
+        const detailEl = document.createElement("p");
+        detailEl.className = "simulation-loading-detail";
+        detailEl.textContent = "";
+        const pctEl = document.createElement("p");
+        pctEl.className = "simulation-loading-pct";
+        pctEl.textContent = "0%";
+        card.appendChild(stageEl);
+        card.appendChild(detailEl);
+        card.appendChild(pctEl);
+        overlay.appendChild(card);
+        document.body.prepend(overlay);
+
+        document.querySelectorAll("[data-run-sizing]").forEach((b) => { b.disabled = true; });
+
+        try {
+          const res = await fetch("/api/run-sizing", {
+            method: "POST",
+            body: formData || undefined,
+          });
+          if (!res.ok) throw new Error("Sizing request failed");
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let lastMessage = null;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const msg = JSON.parse(line);
+                lastMessage = msg;
+                if (msg.error) {
+                  stageEl.textContent = "Error";
+                  detailEl.textContent = msg.error;
+                  barFill.style.width = "0%";
+                  if (msg.redirect) {
+                    sessionStorage.setItem("bess-flash-error", msg.error);
+                    window.location.href = msg.redirect;
+                    return;
+                  }
+                  break;
+                }
+                stageEl.textContent = msg.stage || stageEl.textContent;
+                detailEl.textContent = msg.detail || "";
+                const pct = msg.pct != null ? msg.pct : (msg.done ? 100 : 0);
+                pctEl.textContent = `${Math.round(pct)}%`;
+                barFill.style.width = `${pct}%`;
+                if (msg.done && msg.redirect) {
+                  if (msg.message) sessionStorage.setItem("bess-flash-success", msg.message);
+                  window.location.href = msg.redirect;
+                  return;
+                }
+              } catch (_) {}
+            }
+          }
+          if (lastMessage?.done && lastMessage?.redirect) {
+            if (lastMessage.message) sessionStorage.setItem("bess-flash-success", lastMessage.message);
+            window.location.href = lastMessage.redirect;
+          } else if (lastMessage?.error && lastMessage?.redirect) {
+            sessionStorage.setItem("bess-flash-error", lastMessage.error);
+            window.location.href = lastMessage.redirect;
+          }
+        } catch (err) {
+          stageEl.textContent = "Error";
+          detailEl.textContent = err.message || "Sizing failed";
+          barFill.style.width = "0%";
+          sessionStorage.setItem("bess-flash-error", err.message || "Sizing failed");
+          setTimeout(() => window.location.reload(), 1500);
+        } finally {
+          document.querySelectorAll("[data-run-sizing]").forEach((b) => { b.disabled = false; });
+        }
+      });
+    });
+  };
+
+  const initializeDashboardFileTabs = () => {
+    const panel = document.querySelector(".dashboard-chart-panel");
+    const fileTabs = document.querySelectorAll(".file-tab");
+    const chartGrid = document.querySelector(".dashboard-chart-grid, [data-chart-grid]");
+    const modal = document.querySelector("[data-chart-modal]");
+    const modalCanvas = modal?.querySelector("[data-chart-modal-canvas]");
+    const modalTitleElement = modal?.querySelector("[data-chart-modal-title]");
+    const fileInsightsPanel = document.querySelector(".file-insights-panel");
+
+    if (!panel || !fileTabs.length || !chartGrid) return;
+
+    const fetchAndRenderCharts = async (filePath, startDate, endDate) => {
+      chartGrid.style.opacity = "0.5";
+      if (modalCanvas && modal && !modal.hidden) modalCanvas.style.opacity = "0.5";
+      let url = `/api/render-charts/${encodeURIComponent(filePath)}`;
+      if (startDate || endDate) {
+        const params = new URLSearchParams();
+        if (startDate) params.set("start_date", startDate);
+        if (endDate) params.set("end_date", endDate);
+        url += "?" + params.toString();
+      }
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Failed to fetch charts");
+        const cards = await response.json();
+        if (cards.error) throw new Error(cards.error);
+        let html = "";
+        for (const card of cards) {
+          html += `
+            <article class="chart-card chart-card-large">
+              <div class="chart-card-head">
+                <div><h3>${card.title}</h3><p>${card.subtitle}</p></div>
+                <button type="button" class="button button-ghost button-small" data-chart-open data-chart-title="${card.title}" data-chart-subtitle="${card.subtitle}">Expand</button>
+              </div>
+              <div class="chart-wrap chart-wrap-large">${card.svg}</div>
+            </article>
+          `;
+        }
+        chartGrid.innerHTML = html || '<p class="empty-state">No charts for this file.</p>';
+        panel.setAttribute("data-file-path", filePath);
+      } catch (err) {
+        chartGrid.innerHTML = `<p class="empty-state">Could not load charts: ${err.message}</p>`;
+      }
+      chartGrid.style.opacity = "1";
+      if (modalCanvas && modal && !modal.hidden) modalCanvas.style.opacity = "1";
+    };
+
+    fileTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const filePath = tab.dataset.filePath;
+        if (!filePath) return;
+        fileTabs.forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        const dateForm = panel.querySelector(".date-filter-form");
+        const startDate = dateForm?.querySelector('input[name="start_date"]')?.value || "";
+        const endDate = dateForm?.querySelector('input[name="end_date"]')?.value || "";
+        const newUrl = new URL(window.location);
+        newUrl.searchParams.set("file", filePath);
+        window.history.pushState({}, "", newUrl);
+        fetchAndRenderCharts(filePath, startDate, endDate);
+      });
+    });
+  };
+
+  initializeDashboardFileTabs();
   initializeSidebarToggle();
   initializeSidebarResizer();
   initializeChartModal();
   initializeProgressBar();
+  initializeRunSizing();
   initializeInteractiveCharts();
 })();

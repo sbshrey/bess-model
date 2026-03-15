@@ -54,6 +54,8 @@ With `--dump-sections`, the pipeline writes these CSVs:
 | `rows` | Number of minute rows |
 | `grid_import_kw_min` | Total grid buy |
 | `grid_export_kw_min` | Total grid sell |
+| `total_consumption_kw_min` | Total load (output profile + aux) |
+| `self_consumption_pct` | 100 × (1 − grid_import / total_consumption); profile coverage from renewables+battery |
 | `final_degraded_capacity_kw_min` | End-of-run capacity |
 | `final_soc_pct` | Final SOC % |
 | `cumulative_drawn_kw_min` | Total energy drawn from battery |
@@ -84,6 +86,20 @@ Optimal battery utilization balances cycle throughput with cycle life:
 - **Indicators** — `cumulative_charge_count`, `final_degraded_capacity_kwh`, and SOH % (capacity health) in the summary metrics.
 - **Practical guidance** — Sizing for 90% profile coverage often yields a better cost/benefit than 100% coverage. Consider battery replacement when SOH falls below ~70% (per project notes).
 
+## Industry-Standard Battery Sizing Scenarios
+
+When deciding plant battery size, these top 5 scenario questions guide sizing:
+
+| # | Scenario Question | What It Answers | Key Metric | How the Model Addresses It |
+|---|-------------------|-----------------|------------|----------------------------|
+| 1 | **What battery size minimizes grid import?** | Self-consumption / renewable integration | `grid_import_kw_min` | Run `--mode size`; objective `min_grid_import_then_smallest` picks the capacity with lowest grid import, then smallest if tied. |
+| 2 | **What minimum battery size achieves ≥90% profile coverage (self-consumption)?** | Reliability / renewable share target | `self_consumption_pct` | Set `sizing.constraints.min_self_consumption_pct: 90`; objective `min_battery_then_meet_target` finds the smallest capacity that meets the target. |
+| 3 | **What battery size balances throughput vs degradation over 6–10 years?** | Cycle life / replacement planning | `cumulative_charge_count` | Add `sizing.constraints.max_cycles_per_year` to cap cycling; use calibrated `degradation_per_cycle` for realistic SOH projection. |
+| 4 | **What is the cost-optimal battery size?** | Capex vs avoided grid cost | Grid $ saved vs battery $ | Requires price inputs (import $/kWh, export $/kWh, battery $/kWh). Future: optional economics config block. |
+| 5 | **What battery power (kW) and duration (h) are needed for peak deficit coverage?** | Peak shaving / power vs energy | Deficit duration, C-rate | Sweep `nominal_power_kw` and `duration_hours` in config; analyze worst deficit windows from section outputs. |
+
+Scenarios 1–3 are supported by the sizing sweep. Run `python main.py --config config.example.yaml --mode size` or use **Run Sizing** in the web UI. Results are written to `{plant}_sizing_results.csv`.
+
 ## Output Artifacts
 
 | File | Content |
@@ -92,6 +108,7 @@ Optimal battery utilization balances cycle throughput with cycle life:
 | `{plant}_summary.csv` | One-row summary metrics |
 | `{plant}_energy_table.csv` | Annual energy flows (SOURCES, USES, LOSS) in kW-min |
 | `{plant}_sections/` | Section CSVs (when `--dump-sections`) |
+| `{plant}_sizing_results.csv` | Capacity sweep: grid import, self-consumption %, recommended (when `--mode size`) |
 
 ## Units and Conventions
 

@@ -1,166 +1,25 @@
 {% extends "base.html" %}
-{% block title %}BESS Control Room{% endblock %}
+{% block title %}Dashboard — BESS Control Room{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block topbar_note %}Overview, metrics, and charts from all output files.{% endblock %}
 {% block content %}
-<main class="app-layout dashboard-layout">
-  <aside class="sidebar dashboard-sidebar" data-dashboard-sidebar>
-    <div class="sidebar-resizer"></div>
-    <section class="panel sidebar-panel sidebar-controls-panel">
-      <div class="panel-header panel-header-stack">
-        <div class="sidebar-card-head">
-          <div>
-            <h2>Workspace</h2>
-            <p>{{ plant_name }}</p>
-          </div>
-          <button
-            type="button"
-            class="button button-ghost button-small"
-            data-sidebar-toggle
-            aria-expanded="true"
-          >
-            Collapse
-          </button>
-        </div>
-      </div>
-      <div class="meta-list">
-        <div>
-          <span class="meta-label">Config</span>
-          <span class="meta-value">{{ config_path }}</span>
-        </div>
-        <div>
-          <span class="meta-label">Output Dir</span>
-          <span class="meta-value">{{ output_dir }}</span>
-        </div>
-      </div>
-    </section>
+<main class="tab-content-main dashboard-tab">
+  <section class="metric-grid">
+    {% for metric in metric_cards %}
+      <article class="metric-card">
+        <p class="metric-title">{{ metric.title }}</p>
+        <h3 class="metric-value">{{ metric.value }}</h3>
+        <p class="metric-subtitle">{{ metric.subtitle }}</p>
+      </article>
+    {% endfor %}
+  </section>
 
-    <section class="panel sidebar-panel sidebar-controls-panel">
-      <div class="panel-header panel-header-stack">
-        <h2>Configuration</h2>
-        <p>Edit variables and run from here</p>
-      </div>
-
-      <div class="tabs-wrapper">
-        <div class="tabs-header">
-          <button type="button" class="tab-btn active" data-tab-target="#tab-visual">Visual Form</button>
-          <button type="button" class="tab-btn" data-tab-target="#tab-yaml">Raw YAML</button>
-        </div>
-
-        <div class="tab-content active" id="tab-visual">
-          <form method="post" action="{{ url_for('save_config_form_route') }}" class="stacked-form config-visual-form">
-            <div class="form-section">
-              <h4 class="form-section-title">Basic Settings</h4>
-              <label>Plant Name <input type="text" name="plant_name" value="{{ config.plant_name }}" class="input-field"></label>
-              <label>Output Dir <input type="text" name="output_dir" value="{{ config.output_dir }}" class="input-field"></label>
-            </div>
-
-            <div class="form-section">
-              <h4 class="form-section-title">Data Source Paths</h4>
-              <label>Solar CSV Path <input type="text" name="data.solar_path" value="{{ config.data.solar_path }}" class="input-field"></label>
-              <label>Wind CSV Path <input type="text" name="data.wind_path" value="{{ config.data.wind_path }}" class="input-field"></label>
-            </div>
-
-            <div class="form-section">
-              <h4 class="form-section-title">Preprocessing</h4>
-              <label>Data Frequency <input type="text" name="preprocessing.frequency" value="{{ config.preprocessing.frequency }}" class="input-field"></label>
-              <label>Gap Fill Strategy
-                <select name="preprocessing.gap_fill" class="input-field">
-                  <option value="linear_interpolate" {% if config.preprocessing.gap_fill == 'linear_interpolate' %}selected{% endif %}>Linear Interpolation</option>
-                  <option value="zero" {% if config.preprocessing.gap_fill == 'zero' %}selected{% endif %}>Zero Fill</option>
-                </select>
-              </label>
-              <label>Max Gap Minutes <input type="number" name="preprocessing.max_interpolation_gap_minutes" value="{{ config.preprocessing.max_interpolation_gap_minutes }}" class="input-field"></label>
-              <label>Align to Full Year
-                <select name="preprocessing.align_to_full_year" class="input-field">
-                  <option value="true" {% if config.preprocessing.align_to_full_year %}selected{% endif %}>Yes (525,600 rows)</option>
-                  <option value="false" {% if not config.preprocessing.align_to_full_year %}selected{% endif %}>No (use data range)</option>
-                </select>
-              </label>
-              <label>Simulation Dtype
-                <select name="preprocessing.simulation_dtype" class="input-field">
-                  <option value="float32" {% if config.preprocessing.simulation_dtype == 'float32' %}selected{% endif %}>float32 (low memory)</option>
-                  <option value="float64" {% if config.preprocessing.simulation_dtype == 'float64' %}selected{% endif %}>float64 (high precision)</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="form-section">
-              <h4 class="form-section-title">Grid & Load</h4>
-              <label>Grid Export Limit (kW) <input type="number" step="any" name="grid.export_limit_kw" value="{{ config.grid.export_limit_kw }}" class="input-field"></label>
-              <label>Grid Import Limit (kW) <input type="number" step="any" name="grid.import_limit_kw" value="{{ config.grid.import_limit_kw if config.grid.import_limit_kw is not none else '' }}" class="input-field" placeholder="null"></label>
-              <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw }}" class="input-field"></label>
-              <label>Aux Consumption (kW) <input type="number" step="any" name="load.aux_consumption_kw" value="{{ config.load.aux_consumption_kw }}" class="input-field"></label>
-            </div>
-
-            <div class="form-section">
-              <h4 class="form-section-title">Battery Specs</h4>
-              <label>Nominal Power (kW) <input type="number" step="any" name="battery.nominal_power_kw" value="{{ config.battery.nominal_power_kw }}" class="input-field"></label>
-              <label>Duration (Hours) <input type="number" step="any" name="battery.duration_hours" value="{{ config.battery.duration_hours }}" class="input-field"></label>
-              <label>Charge Efficiency (0-1) <input type="number" step="any" name="battery.charge_efficiency" value="{{ config.battery.charge_efficiency }}" class="input-field"></label>
-              <label>Discharge Efficiency (0-1) <input type="number" step="any" name="battery.discharge_efficiency" value="{{ config.battery.discharge_efficiency }}" class="input-field"></label>
-              <label>Degradation Per Cycle <input type="number" step="any" name="battery.degradation_per_cycle" value="{{ config.battery.degradation_per_cycle }}" class="input-field"></label>
-              <label>Initial SOC Fraction <input type="number" step="any" name="battery.initial_soc_fraction" value="{{ config.battery.initial_soc_fraction }}" class="input-field"></label>
-              <label>Min SOC Fraction <input type="number" step="any" name="battery.min_soc_fraction" value="{{ config.battery.min_soc_fraction }}" class="input-field"></label>
-              <label>Max SOC Fraction <input type="number" step="any" name="battery.max_soc_fraction" value="{{ config.battery.max_soc_fraction }}" class="input-field"></label>
-              <label>Charge Loss Table (C-rate: loss)
-                <textarea name="battery.charge_loss_table" class="input-field" rows="4" placeholder="0.2: 0.04&#10;0.3: 0.045&#10;0.5: 0.07&#10;1.0: 0.11">{% for k, v in (config.battery.charge_loss_table.items()|sort) -%}
-{{ k }}: {{ v }}
-{% endfor -%}</textarea>
-              </label>
-              <label>Discharge Loss Table (C-rate: loss)
-                <textarea name="battery.discharge_loss_table" class="input-field" rows="4" placeholder="0.2: 0.023&#10;0.3: 0.032&#10;0.5: 0.042&#10;1.0: 0.062">{% for k, v in (config.battery.discharge_loss_table.items()|sort) -%}
-{{ k }}: {{ v }}
-{% endfor -%}</textarea>
-              </label>
-            </div>
-
-            <div class="button-stack">
-              <button type="submit" class="button button-secondary">Save Config</button>
-              <button type="submit" formaction="{{ url_for('run_simulation_form') }}" class="button">Run Simulation</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="tab-content" id="tab-yaml">
-          <form method="post" action="{{ url_for('save_config') }}" class="stacked-form">
-            <textarea name="config_text" class="yaml-editor" spellcheck="false">{{ config_text }}</textarea>
-            <div class="button-stack">
-              <button type="submit" class="button button-secondary">Save YAML</button>
-              <button type="submit" formaction="{{ url_for('run_simulation') }}" class="button">Run Simulation</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </section>
-
-  </aside>
-
-  <section class="content dashboard-content">
-    <section class="dashboard-expand-toolbar">
-      <button
-        type="button"
-        class="button button-ghost"
-        data-sidebar-toggle
-        aria-expanded="true"
-      >
-        Expand Sidebar
-      </button>
-    </section>
-
-    <section class="metric-grid">
-      {% for metric in metric_cards %}
-        <article class="metric-card">
-          <p class="metric-title">{{ metric.title }}</p>
-          <h3 class="metric-value">{{ metric.value }}</h3>
-          <p class="metric-subtitle">{{ metric.subtitle }}</p>
-        </article>
-      {% endfor %}
-    </section>
-
+  <div class="dashboard-grid">
     {% if energy_table %}
     <section class="panel content-panel energy-table-panel">
       <div class="panel-header panel-header-stack">
         <h2>Energy Table</h2>
-        <p class="section-subtitle">Annual energy flows in kW-min (SOURCES, USES, LOSS) – static until config changes</p>
+        <p class="section-subtitle">Annual energy flows in kW-min (SOURCES, USES, LOSS)</p>
       </div>
       <div class="energy-table-wrap">
         <table class="energy-table">
@@ -185,167 +44,117 @@
     </section>
     {% endif %}
 
-    <section class="panel content-panel dashboard-chart-panel" data-file-path="{{ selected_file }}">
+    {% if sizing_results %}
+    <section class="panel content-panel sizing-results-panel">
       <div class="panel-header panel-header-stack">
-        <div class="file-toolbar">
-          <form method="get" action="{{ url_for('dashboard') }}" class="file-select-form">
-            <label for="file-select" class="file-select-label">File:</label>
-            <select id="file-select" name="file" onchange="this.form.submit()" class="file-selector">
-              {% for item in outputs %}
-                <option value="{{ item.relative_path }}" {% if selected_file == item.relative_path %}selected{% endif %}>
-                  {{ item.name }} ({{ '%.1f'|format(item.size_kb) }} KB)
-                </option>
-              {% endfor %}
-            </select>
-            {% if date_filter and date_filter.enabled %}
-              <input type="hidden" name="start_date" value="{{ date_filter.start_date }}">
-              <input type="hidden" name="end_date" value="{{ date_filter.end_date }}">
+        <h2>Sizing Results</h2>
+        <p class="section-subtitle">Capacity sweep: grid import and self-consumption by battery size</p>
+      </div>
+      <div class="sizing-table-wrap">
+        <table class="energy-table sizing-table">
+          <thead>
+            <tr>
+              <th>Capacity (kWh)</th>
+              <th class="energy-table-value">Grid Import (kW-min)</th>
+              <th class="energy-table-value">Self-Consumption %</th>
+              <th class="energy-table-value">Charge Count</th>
+              <th>Recommended</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in sizing_results %}
+            <tr class="{% if row.get('recommended') %}sizing-recommended{% endif %}">
+              <td>{{ "{:,.0f}".format(row.get('capacity_kwh', 0)) }}</td>
+              <td class="energy-table-value">{{ "{:,.0f}".format(row.get('grid_import_kw_min', 0)) }}</td>
+              <td class="energy-table-value">{{ "%.1f"|format(row.get('self_consumption_pct', 0)) }}%</td>
+              <td class="energy-table-value">{{ "%.1f"|format(row.get('cumulative_charge_count', 0)) }}</td>
+              <td>{% if row.get('recommended') %}&#9733;{% else %}&#8212;{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+  </div>
+
+  <section class="panel content-panel dashboard-chart-panel" data-file-path="{{ selected_file }}">
+    <div class="panel-header panel-header-stack">
+      <h2>Charts from Output Files</h2>
+      <p class="section-subtitle">Select a file to view its charts. Drag on chart to zoom.</p>
+      <div class="chart-file-toolbar">
+        <div class="file-tabs" role="tablist">
+          {% for item in outputs %}
+            {% if item.name.endswith('.csv') %}
+            <button type="button" class="file-tab {% if selected_file == item.relative_path %}active{% endif %}"
+                    data-file-path="{{ item.relative_path }}" data-file-name="{{ item.name }}" role="tab">
+              {{ item.name }}
+            </button>
             {% endif %}
-          </form>
-
-          {% if selected_file %}
-            <div class="file-actions-row">
-              <a class="button button-ghost button-small" href="{{ url_for('download_file', relative_path=selected_file) }}">Download</a>
-              {% if selected_file.endswith('.csv') %}
-                <a class="button button-ghost button-small" href="{{ url_for('edit_csv', relative_path=selected_file, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Edit CSV</a>
-              {% endif %}
-            </div>
-          {% endif %}
-
-          <div class="toolbar-spacer"></div>
-
-          {% if date_filter and date_filter.enabled %}
-            <form method="get" action="{{ url_for('dashboard') }}" class="date-filter-form">
-              <input type="hidden" name="file" value="{{ selected_file or '' }}">
-              <label class="date-filter-label">
-                <span>Start</span>
-                <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
-              </label>
-              <label class="date-filter-label">
-                <span>End</span>
-                <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
-              </label>
-              <div class="date-filter-actions">
-                <button type="submit" class="button button-ghost button-small">Apply</button>
-                <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}">Clear</a>
-              </div>
-            </form>
-          {% endif %}
+          {% endfor %}
         </div>
+        {% if selected_file %}
+        <div class="file-actions-row">
+          <a class="button button-ghost button-small" href="{{ url_for('download_file', relative_path=selected_file) }}">Download</a>
+          <a class="button button-ghost button-small" href="{{ url_for('edit_csv', relative_path=selected_file, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Edit CSV</a>
+        </div>
+        {% endif %}
       </div>
       {% if date_filter and date_filter.enabled %}
-        <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows from {{ date_filter.start_date }} to {{ date_filter.end_date }}.</p>
+      <form method="get" action="{{ url_for('dashboard') }}" class="date-filter-form">
+        <input type="hidden" name="file" value="{{ selected_file or '' }}">
+        <label class="date-filter-label">
+          <span>Start</span>
+          <input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
+        </label>
+        <label class="date-filter-label">
+          <span>End</span>
+          <input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}">
+        </label>
+        <div class="date-filter-actions">
+          <button type="submit" class="button button-ghost button-small">Apply</button>
+          <a class="button button-ghost button-small" href="{{ url_for('dashboard', file=selected_file) }}">Clear</a>
+        </div>
+      </form>
       {% endif %}
-      <div class="chart-and-insights">
-        <div class="chart-area">
-      {% if chart_cards %}
-        <div class="chart-grid dashboard-chart-grid">
+    </div>
+    {% if date_filter and date_filter.enabled %}
+    <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows from {{ date_filter.start_date }} to {{ date_filter.end_date }}.</p>
+    {% endif %}
+    <div class="chart-and-insights">
+      <div class="chart-area">
+        {% if chart_cards %}
+        <div class="chart-grid dashboard-chart-grid" data-chart-grid>
           {% for chart in chart_cards %}
-            <article class="chart-card">
+            <article class="chart-card chart-card-large">
               <div class="chart-card-head">
                 <div>
                   <h3>{{ chart.title }}</h3>
                   <p>{{ chart.subtitle }}</p>
                 </div>
-                <button
-                  type="button"
-                  class="button button-ghost button-small"
-                  data-chart-open
-                  data-chart-title="{{ chart.title }}"
-                  data-chart-subtitle="{{ chart.subtitle }}"
-                >
+                <button type="button" class="button button-ghost button-small" data-chart-open
+                        data-chart-title="{{ chart.title }}" data-chart-subtitle="{{ chart.subtitle }}">
                   Expand
                 </button>
               </div>
-              <div class="chart-wrap">{{ chart.svg|safe }}</div>
+              <div class="chart-wrap chart-wrap-large">{{ chart.svg|safe }}</div>
             </article>
           {% endfor %}
         </div>
-      {% elif chart_svg %}
-        <div class="chart-wrap">{{ chart_svg|safe }}</div>
-      {% else %}
-        <p class="empty-state">No chartable CSV selected yet.</p>
-      {% endif %}
-        </div>
-        {% if file_insights %}
-        <aside class="file-insights-panel">
-          <h3 class="file-insights-title">{{ file_insights.title }}</h3>
-          <p class="file-insights-desc">{{ file_insights.description }}</p>
-          <p class="file-insights-how"><strong>How:</strong> {{ file_insights.how }}</p>
-        </aside>
+        {% elif chart_svg %}
+        <div class="chart-wrap chart-wrap-large">{{ chart_svg|safe }}</div>
+        {% else %}
+        <p class="empty-state">Select an output file above to view charts.</p>
         {% endif %}
       </div>
-    </section>
-
-    <section class="panel content-panel dashboard-table-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Data Preview</h2>
-          <p class="section-subtitle">Page {{ page }} of {{ total_pages }} ({{ total_rows }} rows total)</p>
-        </div>
-        {% if selected_file %}
-        <form method="get" action="{{ url_for('dashboard') }}" class="table-controls-form">
-          <input type="hidden" name="file" value="{{ selected_file }}">
-          {% if date_filter and date_filter.enabled %}
-          <input type="hidden" name="start_date" value="{{ date_filter.start_date }}">
-          <input type="hidden" name="end_date" value="{{ date_filter.end_date }}">
-          {% endif %}
-          <label>
-            <span>Rows per page</span>
-            <select name="page_size" onchange="this.form.submit()">
-              <option value="10" {% if page_size == 10 %}selected{% endif %}>10</option>
-              <option value="20" {% if page_size == 20 %}selected{% endif %}>20</option>
-              <option value="50" {% if page_size == 50 %}selected{% endif %}>50</option>
-              <option value="100" {% if page_size == 100 %}selected{% endif %}>100</option>
-            </select>
-          </label>
-        </form>
-        {% endif %}
-      </div>
-      {% if preview_rows %}
-        <div class="table-shell dashboard-table-shell">
-          <table>
-            <thead>
-              <tr>
-                {% for column in preview_columns %}
-                  <th>{{ column }}</th>
-                {% endfor %}
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in preview_rows %}
-                <tr>
-                  {% for column in preview_columns %}
-                    <td>{{ row[column] }}</td>
-                  {% endfor %}
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        <div class="pagination sticky-pagination dashboard-pagination">
-          {% if page > 1 %}
-            <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page - 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Previous</a>
-          {% endif %}
-
-          <div class="pagination-numbers">
-            {% for p in generate_page_window(page, total_pages) %}
-              {% if p is none %}
-                <span class="pagination-ellipsis">&hellip;</span>
-              {% else %}
-                <a class="pagination-page {% if p == page %}active{% endif %}" href="{{ url_for('dashboard', file=selected_file, page=p, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">{{ p }}</a>
-              {% endif %}
-            {% endfor %}
-          </div>
-
-          {% if page < total_pages %}
-            <a class="button button-ghost pagination-page" href="{{ url_for('dashboard', file=selected_file, page=page + 1, page_size=page_size, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}">Next</a>
-          {% endif %}
-        </div>
-      {% else %}
-        <p class="empty-state">Run a simulation or choose an output CSV to inspect.</p>
+      {% if file_insights %}
+      <aside class="file-insights-panel">
+        <h3 class="file-insights-title">{{ file_insights.title }}</h3>
+        <p class="file-insights-desc">{{ file_insights.description }}</p>
+        <p class="file-insights-how"><strong>How:</strong> {{ file_insights.how }}</p>
+      </aside>
       {% endif %}
-    </section>
+    </div>
   </section>
 </main>
 {% endblock %}

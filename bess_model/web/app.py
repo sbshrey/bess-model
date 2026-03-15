@@ -19,6 +19,7 @@ from bess_model.web.services import (
     list_output_files,
     load_energy_table,
     load_metric_cards,
+    load_sizing_results,
     load_config_text,
     load_csv_page,
     load_filtered_csv,
@@ -28,6 +29,7 @@ from bess_model.web.services import (
     run_simulation_from_frontend,
     run_simulation_from_form_frontend,
     run_simulation_with_progress,
+    run_sizing_with_progress,
     save_config_text,
     save_config_form,
     save_csv_page_edits,
@@ -72,6 +74,11 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         return jsonify({"status": "ok"}), 200
 
     @app.get("/")
+    def index():
+        """Redirect to dashboard tab."""
+        return redirect(url_for("dashboard"))
+
+    @app.get("/dashboard")
     def dashboard():
         config_file = Path(app.config["CONFIG_PATH"])
         config_text = load_config_text(config_file)
@@ -89,6 +96,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
         date_filter = None
         metric_cards = load_metric_cards(config)
         energy_table = load_energy_table(config)
+        sizing_results = load_sizing_results(config)
 
         page = int(request.args.get("page", "1"))
         page_size = int(request.args.get("page_size", "20"))
@@ -128,6 +136,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             selected_file=selected,
             metric_cards=metric_cards,
             energy_table=energy_table,
+            sizing_results=sizing_results,
             plant_name=config.plant_name,
             output_dir=config.output_dir,
             preview_columns=preview_columns,
@@ -136,6 +145,109 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             chart_cards=chart_cards,
             date_filter=date_filter,
             file_insights=get_file_insights(selected),
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            total_rows=total_rows,
+        )
+
+    @app.get("/config")
+    def config_page():
+        """Configuration tab: full visual form."""
+        config_file = Path(app.config["CONFIG_PATH"])
+        config = SimulationConfig.from_yaml(config_file)
+        return render_template(
+            "config.html",
+            config=config,
+            config_path=str(config_file),
+            plant_name=config.plant_name,
+            output_dir=config.output_dir,
+        )
+
+    @app.get("/output")
+    def output_page():
+        """Output tab: file browser with charts."""
+        config = SimulationConfig.from_yaml(app.config["CONFIG_PATH"])
+        outputs = list_output_files(config)
+        selected = request.args.get("file")
+        start_date = normalize_date_input(request.args.get("start_date"))
+        end_date = normalize_date_input(request.args.get("end_date"))
+        if not selected and outputs:
+            selected = choose_default_output_file(config, outputs)
+        chart_cards = []
+        chart_svg = None
+        date_filter = None
+        file_insights = None
+        if selected:
+            try:
+                selected_path = resolve_output_file(config, selected)
+                if selected_path.suffix == ".csv":
+                    filtered_csv = load_filtered_csv(
+                        selected_path, start_date=start_date, end_date=end_date
+                    )
+                    chart_svg = build_chart_svg(df=filtered_csv.df)
+                    chart_cards = build_chart_cards(df=filtered_csv.df)
+                    date_filter = filtered_csv.date_filter
+                    file_insights = get_file_insights(selected)
+            except (FileNotFoundError, ValueError):
+                pass
+        return render_template(
+            "output.html",
+            config=config,
+            outputs=outputs,
+            selected_file=selected,
+            chart_cards=chart_cards,
+            chart_svg=chart_svg,
+            date_filter=date_filter,
+            file_insights=file_insights,
+            plant_name=config.plant_name,
+            output_dir=config.output_dir,
+        )
+
+    @app.get("/data")
+    def data_page():
+        """Data Preview tab: table with file selector and pagination."""
+        config = SimulationConfig.from_yaml(app.config["CONFIG_PATH"])
+        outputs = list_output_files(config)
+        selected = request.args.get("file")
+        start_date = normalize_date_input(request.args.get("start_date"))
+        end_date = normalize_date_input(request.args.get("end_date"))
+        if not selected and outputs:
+            selected = choose_default_output_file(config, outputs)
+        preview_columns = []
+        preview_rows = []
+        page = int(request.args.get("page", "1"))
+        page_size = int(request.args.get("page_size", "20"))
+        total_rows = 0
+        total_pages = 1
+        date_filter = None
+
+        if selected:
+            try:
+                selected_path = resolve_output_file(config, selected)
+            except (FileNotFoundError, ValueError):
+                selected = outputs[0].relative_path if outputs else None
+                selected_path = None
+
+            if selected_path and selected_path.suffix == ".csv":
+                filtered_csv = load_filtered_csv(selected_path, start_date=start_date, end_date=end_date)
+                total_rows = filtered_csv.df.height
+                total_pages = max(1, math.ceil(total_rows / page_size))
+                page = max(1, min(page, total_pages))
+                start_idx = (page - 1) * page_size
+                paginated_df = filtered_csv.df.slice(start_idx, page_size)
+                preview_columns, preview_rows = build_preview_table(df=paginated_df, limit=page_size)
+                date_filter = filtered_csv.date_filter
+
+        return render_template(
+            "data.html",
+            config=config,
+            outputs=outputs,
+            selected_file=selected,
+            preview_columns=preview_columns,
+            preview_rows=preview_rows,
+            plant_name=config.plant_name,
+            date_filter=date_filter,
             page=page,
             page_size=page_size,
             total_pages=total_pages,
@@ -160,7 +272,7 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
             flash("Configuration saved from visual form.", "success")
         except Exception as exc:  # pragma: no cover
             flash(f"Failed to save config: {exc}", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(request.referrer or url_for("config_page"))
 
     def _format_simulation_error(exc: Exception) -> str:
         """Format simulation errors for clear user feedback."""
@@ -258,6 +370,66 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
                     "done": True,
                     "redirect": url_for("dashboard"),
                     "message": f"Simulation completed for {config.plant_name}. Rows: {result.summary_metrics['rows']}.",
+                }) + "\n"
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="application/x-ndjson",
+        )
+
+    @app.post("/api/run-sizing")
+    def api_run_sizing_stream():
+        """Stream sizing sweep progress as NDJSON. Accepts optional form data to save config first."""
+        import json
+        import threading
+        from queue import Empty, Queue
+
+        config_file = Path(app.config["CONFIG_PATH"])
+        form_data = request.form.to_dict() if request.form else None
+
+        def generate():
+            queue = Queue()
+
+            def run():
+                try:
+                    if form_data:
+                        save_config_form(config_file, form_data)
+                    def emit(stage: str, pct: float, detail: str) -> None:
+                        queue.put(("progress", stage, pct, detail))
+
+                    config, _, optimal = run_sizing_with_progress(config_file, emit)
+                    msg = f"Recommended: {optimal['capacity_kwh']} kWh" if optimal else "No solution met constraints."
+                    queue.put(("done", config, msg, None))
+                except Exception as exc:
+                    queue.put(("done", None, None, exc))
+
+            thread = threading.Thread(target=run)
+            thread.start()
+
+            while True:
+                try:
+                    msg = queue.get(timeout=0.2)
+                except Empty:
+                    yield ""
+                    continue
+                if msg[0] == "progress":
+                    _, stage, pct, detail = msg
+                    yield json.dumps({"stage": stage, "pct": pct, "detail": detail}) + "\n"
+                else:
+                    _, config, message, exc = msg
+                    break
+
+            thread.join()
+            if exc:
+                yield json.dumps({
+                    "error": _format_simulation_error(exc),
+                    "redirect": url_for("dashboard"),
+                }) + "\n"
+            else:
+                yield json.dumps({
+                    "done": True,
+                    "redirect": url_for("dashboard"),
+                    "message": f"Sizing completed. {message}",
                 }) + "\n"
 
         return Response(

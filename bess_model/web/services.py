@@ -23,8 +23,10 @@ from bess_model.core.pipeline import (
     simulate_system,
     write_simulation_outputs,
 )
+from bess_model.config import SizingConfig
 from bess_model.flows.section_outputs import write_section_outputs
 from bess_model.results import SimulationResult
+from bess_model.sizing import run_sizing_sweep, select_optimal
 
 
 
@@ -116,8 +118,18 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
     # Keys whose values must be parsed as YAML (e.g. dict/mapping fields)
     table_keys = {"battery.charge_loss_table", "battery.discharge_loss_table"}
 
+    # Keys that need special parsing
+    skip_keys = {"config_text", "recalculate", "page", "page_size", "start_date", "end_date", "file"}
+    bool_keys = {"preprocessing.align_to_full_year", "sizing.enabled"}
+    list_float_keys = {"sizing.capacities_kwh"}
+    nullable_float_keys = {
+        "grid.import_limit_kw",
+        "sizing.constraints.min_self_consumption_pct",
+        "sizing.constraints.max_cycles_per_year",
+    }
+
     for key, raw_value in form_data.items():
-        if key in ("config_text", "recalculate", "page", "page_size", "start_date", "end_date", "file"):
+        if key in skip_keys:
             continue
 
         value: Any = raw_value
@@ -134,13 +146,29 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
             else:
                 value = {}
         else:
-            # Parse boolean for align_to_full_year
-            if key == "preprocessing.align_to_full_year":
+            if key in bool_keys:
                 value = str(raw_value).lower() in ("true", "on", "1", "yes")
-            # Parse numeric strings dynamically
-            elif isinstance(value, str) and value.replace(".", "", 1).isdigit() and "." in value:
+            elif key in list_float_keys:
+                text = (raw_value or "").strip()
+                if text:
+                    try:
+                        value = [float(x.strip()) for x in text.replace(",", " ").split() if x.strip()]
+                    except (TypeError, ValueError):
+                        value = []
+                else:
+                    value = []
+            elif key in nullable_float_keys:
+                text = (raw_value or "").strip()
+                if not text or text.lower() in ("null", "none", ""):
+                    value = None
+                else:
+                    try:
+                        value = float(text)
+                    except (TypeError, ValueError):
+                        value = None
+            elif isinstance(value, str) and value.replace(".", "", 1).replace("-", "", 1).isdigit() and "." in value:
                 value = float(value)
-            elif isinstance(value, str) and value.isdigit():
+            elif isinstance(value, str) and value.replace("-", "", 1).isdigit():
                 value = int(value)
 
         parts = key.split(".")
@@ -379,6 +407,64 @@ def load_energy_table(config: SimulationConfig) -> list[EnergyTableRow] | None:
     ]
 
 
+def load_sizing_results(config: SimulationConfig) -> list[dict[str, Any]] | None:
+    """Load sizing sweep results from CSV when available."""
+    sizing_path = Path(config.output_dir) / f"{config.plant_name}_sizing_results.csv"
+    if not sizing_path.exists():
+        return None
+    df = pl.read_csv(sizing_path)
+    if df.height == 0:
+        return []
+    return df.to_dicts()
+
+
+def run_sizing_with_progress(
+    config_path: Path,
+    progress_yield: Callable[[str, float, str], None],
+) -> tuple[SimulationConfig, list[dict[str, Any]], dict[str, Any] | None]:
+    """Run sizing sweep, calling progress_yield(stage, pct, detail) at each checkpoint."""
+
+    def progress_cb(stage: str, pct: float, detail: str) -> None:
+        progress_yield(stage, round(pct, 1), detail)
+
+    config = SimulationConfig.from_yaml(config_path)
+    sizing = config.sizing or SizingConfig(
+        capacities_kwh=[
+            config.battery.capacity_kwh * f
+            for f in (0.5, 0.75, 1.0, 1.25, 1.5)
+        ]
+    )
+    if not sizing.enabled:
+        sizing = SizingConfig(capacities_kwh=sizing.capacities_kwh)
+
+    progress_cb("Sizing sweep", 0, f"Running {len(sizing.capacities_kwh)} capacities")
+    results = run_sizing_sweep(config, sizing.capacities_kwh, progress_callback=progress_cb)
+    constraints = {}
+    if sizing.min_self_consumption_pct is not None:
+        constraints["min_self_consumption_pct"] = sizing.min_self_consumption_pct
+    if sizing.max_cycles_per_year is not None:
+        constraints["max_cycles_per_year"] = sizing.max_cycles_per_year
+    optimal = select_optimal(results, sizing.objective, constraints)
+
+    # Persist results
+    rows = []
+    for r in results:
+        m = r["metrics"]
+        rows.append({
+            "capacity_kwh": r["capacity_kwh"],
+            "grid_import_kw_min": m.get("grid_import_kw_min"),
+            "self_consumption_pct": m.get("self_consumption_pct"),
+            "cumulative_charge_count": m.get("cumulative_charge_count"),
+            "recommended": r.get("recommended", False),
+        })
+    output_dir = Path(config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(rows).write_csv(output_dir / f"{config.plant_name}_sizing_results.csv")
+
+    progress_cb("Done", 100, f"Recommended: {optimal['capacity_kwh']} kWh" if optimal else "No solution")
+    return config, results, optimal
+
+
 def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
     """Load KPI cards from the latest summary output; all plant summary columns plus green section."""
     summary_path = Path(config.output_dir) / f"{config.plant_name}_summary.csv"
@@ -406,6 +492,11 @@ def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
     cards: list[MetricCard] = [
         MetricCard("Rows", _format_number(row.get("rows", 0), digits=0), "Minute rows"),
         MetricCard("Grid Import", _format_number(_kw_min("grid_import_kw_min", "grid_import_energy_kwh")) + " kW-min", "Energy from grid"),
+        MetricCard(
+            "Self-Consumption",
+            _format_number(row.get("self_consumption_pct", 0), digits=1) + "%",
+            "Profile coverage (renewables+battery)",
+        ),
         MetricCard("Grid Export", _format_number(_kw_min("grid_export_kw_min", "grid_export_energy_kwh")) + " kW-min", "Energy to grid"),
         MetricCard(
             "Degraded Capacity",
@@ -699,8 +790,10 @@ def build_chart_svg_from_df(
     df: pl.DataFrame,
     preferred_columns: list[str] | None = None,
     x_column: str = "timestamp",
+    width: int = 1100,
+    height: int = 380,
 ) -> str | None:
-    """Render a small multi-series SVG line chart from an existing DataFrame."""
+    """Render a multi-series SVG line chart from an existing DataFrame."""
     if df.height == 0:
         return None
 
@@ -719,13 +812,11 @@ def build_chart_svg_from_df(
     if not columns:
         return None
 
-    max_points = 240
+    max_points = 360
     if df.height > max_points:
         step = max(1, math.ceil(df.height / max_points))
         df = df.gather_every(step)
 
-    width = 720
-    height = 240
     left_padding = 66
     right_padding = 18
     top_padding = 40
@@ -812,9 +903,9 @@ def build_chart_svg_from_df(
         )
 
     return (
-        f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
+        f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" '
         f'class="chart-svg" role="img" aria-label="Flow chart" '
-        f'data-x-min="{x_min}" data-x-max="{x_max}">'
+        f'data-x-min="{x_min}" data-x-max="{x_max}" data-chart-width="{width}" data-chart-height="{height}">'
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="#ffffff" rx="12" />'
         f'<line x1="{left_padding}" y1="{height - bottom_padding}" x2="{width - right_padding}" y2="{height - bottom_padding}" '
         f'stroke="#cbd5e1" stroke-width="1.5" />'

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Configuration — BESS Control Room{% endblock %}
+{% block page_title %}Configuration{% endblock %}
+{% block topbar_note %}Edit all simulation parameters. Save and run simulations from here.{% endblock %}
+{% block content %}
+<main class="tab-content-main config-tab">
+  <section class="panel config-panel">
+    <div class="panel-header config-panel-header">
+      <div>
+        <h2>Simulation Configuration</h2>
+        <p class="section-subtitle">{{ plant_name }} · {{ output_dir }}</p>
+      </div>
+      <div class="config-actions">
+        <button type="submit" form="config-form-full" class="button button-secondary">Save Config</button>
+        <button type="submit" form="config-form-full" formaction="{{ url_for('run_simulation_form') }}" class="button">Run Simulation</button>
+        <button type="button" class="button button-ghost" data-run-sizing>Run Sizing</button>
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('save_config_form_route') }}" class="config-visual-form" id="config-form-full">
+      <div class="config-form-grid">
+        <div class="form-section-group">
+          <h3 class="form-group-title">Basic Settings</h3>
+          <div class="form-section">
+            <label>Plant Name <input type="text" name="plant_name" value="{{ config.plant_name }}" class="input-field"></label>
+            <label>Output Dir <input type="text" name="output_dir" value="{{ config.output_dir }}" class="input-field"></label>
+          </div>
+        </div>
+
+        <div class="form-section-group">
+          <h3 class="form-group-title">Data Source Paths</h3>
+          <div class="form-section">
+            <label>Solar CSV Path <input type="text" name="data.solar_path" value="{{ config.data.solar_path }}" class="input-field"></label>
+            <label>Wind CSV Path <input type="text" name="data.wind_path" value="{{ config.data.wind_path }}" class="input-field"></label>
+          </div>
+        </div>
+
+        <div class="form-section-group">
+          <h3 class="form-group-title">Preprocessing</h3>
+          <div class="form-section">
+            <label>Data Frequency <input type="text" name="preprocessing.frequency" value="{{ config.preprocessing.frequency }}" class="input-field"></label>
+            <label>Gap Fill Strategy
+              <select name="preprocessing.gap_fill" class="input-field">
+                <option value="linear_interpolate" {% if config.preprocessing.gap_fill == 'linear_interpolate' %}selected{% endif %}>Linear Interpolation</option>
+                <option value="zero" {% if config.preprocessing.gap_fill == 'zero' %}selected{% endif %}>Zero Fill</option>
+              </select>
+            </label>
+            <label>Max Gap Minutes <input type="number" name="preprocessing.max_interpolation_gap_minutes" value="{{ config.preprocessing.max_interpolation_gap_minutes }}" class="input-field"></label>
+            <label>Align to Full Year
+              <select name="preprocessing.align_to_full_year" class="input-field">
+                <option value="true" {% if config.preprocessing.align_to_full_year %}selected{% endif %}>Yes (525,600 rows)</option>
+                <option value="false" {% if not config.preprocessing.align_to_full_year %}selected{% endif %}>No (use data range)</option>
+              </select>
+            </label>
+            <label>Simulation Dtype
+              <select name="preprocessing.simulation_dtype" class="input-field">
+                <option value="float32" {% if config.preprocessing.simulation_dtype == 'float32' %}selected{% endif %}>float32 (low memory)</option>
+                <option value="float64" {% if config.preprocessing.simulation_dtype == 'float64' %}selected{% endif %}>float64 (high precision)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section-group">
+          <h3 class="form-group-title">Grid & Load</h3>
+          <div class="form-section">
+            <label>Grid Export Limit (kW) <input type="number" step="any" name="grid.export_limit_kw" value="{{ config.grid.export_limit_kw }}" class="input-field"></label>
+            <label>Grid Import Limit (kW) <input type="number" step="any" name="grid.import_limit_kw" value="{{ config.grid.import_limit_kw if config.grid.import_limit_kw is not none else '' }}" class="input-field" placeholder="null"></label>
+            <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw }}" class="input-field"></label>
+            <label>Aux Consumption (kW) <input type="number" step="any" name="load.aux_consumption_kw" value="{{ config.load.aux_consumption_kw }}" class="input-field"></label>
+          </div>
+        </div>
+
+        <div class="form-section-group">
+          <h3 class="form-group-title">Battery Specs</h3>
+          <div class="form-section">
+            <label>Nominal Power (kW) <input type="number" step="any" name="battery.nominal_power_kw" value="{{ config.battery.nominal_power_kw }}" class="input-field"></label>
+            <label>Duration (Hours) <input type="number" step="any" name="battery.duration_hours" value="{{ config.battery.duration_hours }}" class="input-field"></label>
+            <label>Charge Efficiency (0-1) <input type="number" step="any" name="battery.charge_efficiency" value="{{ config.battery.charge_efficiency }}" class="input-field"></label>
+            <label>Discharge Efficiency (0-1) <input type="number" step="any" name="battery.discharge_efficiency" value="{{ config.battery.discharge_efficiency }}" class="input-field"></label>
+            <label>Degradation Per Cycle <input type="number" step="any" name="battery.degradation_per_cycle" value="{{ config.battery.degradation_per_cycle }}" class="input-field"></label>
+            <label>Initial SOC Fraction <input type="number" step="any" name="battery.initial_soc_fraction" value="{{ config.battery.initial_soc_fraction }}" class="input-field"></label>
+            <label>Min SOC Fraction <input type="number" step="any" name="battery.min_soc_fraction" value="{{ config.battery.min_soc_fraction }}" class="input-field"></label>
+            <label>Max SOC Fraction <input type="number" step="any" name="battery.max_soc_fraction" value="{{ config.battery.max_soc_fraction }}" class="input-field"></label>
+            <label>Charge Loss Table (C-rate: loss)
+              <textarea name="battery.charge_loss_table" class="input-field code-textarea" rows="4" placeholder="0.2: 0.04&#10;0.3: 0.045&#10;0.5: 0.07&#10;1.0: 0.11">{% for k, v in (config.battery.charge_loss_table.items()|sort) -%}
+{{ k }}: {{ v }}
+{% endfor -%}</textarea>
+            </label>
+            <label>Discharge Loss Table (C-rate: loss)
+              <textarea name="battery.discharge_loss_table" class="input-field code-textarea" rows="4" placeholder="0.2: 0.023&#10;0.3: 0.032&#10;0.5: 0.042&#10;1.0: 0.062">{% for k, v in (config.battery.discharge_loss_table.items()|sort) -%}
+{{ k }}: {{ v }}
+{% endfor -%}</textarea>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section-group form-section-group-wide">
+          <h3 class="form-group-title">Battery Sizing Sweep</h3>
+          <div class="form-section">
+            <label>Sizing Enabled
+              <select name="sizing.enabled" class="input-field">
+                <option value="true" {% if config.sizing and config.sizing.enabled %}selected{% endif %}>Yes</option>
+                <option value="false" {% if not config.sizing or not config.sizing.enabled %}selected{% endif %}>No</option>
+              </select>
+            </label>
+            <label>Capacities (kWh) <input type="text" name="sizing.capacities_kwh" value="{{ config.sizing.capacities_kwh | join(', ') if config.sizing else '500, 750, 1000, 1250, 1500' }}" class="input-field" placeholder="500, 750, 1000, 1250, 1500"></label>
+            <label>Objective
+              <select name="sizing.objective" class="input-field">
+                <option value="min_grid_import_then_smallest" {% if config.sizing and config.sizing.objective == 'min_grid_import_then_smallest' %}selected{% endif %}>Minimize grid import, then smallest</option>
+                <option value="min_battery_then_meet_target" {% if config.sizing and config.sizing.objective == 'min_battery_then_meet_target' %}selected{% endif %}>Minimize battery, meet target</option>
+              </select>
+            </label>
+            <label>Min Self-Consumption % <input type="number" step="any" name="sizing.constraints.min_self_consumption_pct" value="{{ config.sizing.min_self_consumption_pct if config.sizing and config.sizing.min_self_consumption_pct is not none else '' }}" class="input-field" placeholder="e.g. 90 (optional)"></label>
+            <label>Max Cycles Per Year <input type="number" step="any" name="sizing.constraints.max_cycles_per_year" value="{{ config.sizing.max_cycles_per_year if config.sizing and config.sizing.max_cycles_per_year is not none else '' }}" class="input-field" placeholder="optional"></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-form-footer">
+        <button type="submit" class="button button-secondary">Save Config</button>
+        <button type="submit" formaction="{{ url_for('run_simulation_form') }}" class="button">Save & Run Simulation</button>
+        <button type="button" class="button button-ghost" data-run-sizing>Run Sizing</button>
+      </div>
+    </form>
+  </section>
+</main>
+{% endblock %}

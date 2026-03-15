@@ -36,3 +36,11 @@ battery:
     1.2: 0.067
   min_soc_fraction: 0.0
   max_soc_fraction: 1.0
+# Optional: battery sizing sweep (run with --mode size)
+sizing:
+  enabled: true
+  capacities_kwh: [500, 750, 1000, 1250, 1500]
+  objective: min_grid_import_then_smallest
+  constraints:
+    min_self_consumption_pct: 90.0  # "not miss 90% profile" - 90% self-consumption target
+    max_cycles_per_year: null       # optional degradation cap

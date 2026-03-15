@@ -99,11 +99,18 @@ def run_pipeline(
 
 def compute_summary_metrics(df: pl.DataFrame, plant_name: str) -> dict[str, float | int | str]:
     """Aggregate minute-level section outputs into KPI metrics (values in kW-min for consistency)."""
+    grid_import = _sum_kw_min(df, "grid_buy_kw")
+    total_consumption = _sum_kw_min(df, "total_consumption_kw")
+    self_consumption_pct = (
+        100.0 * (1.0 - grid_import / total_consumption) if total_consumption > 0 else 100.0
+    )
     return {
         "plant_name": plant_name,
         "rows": df.height,
-        "grid_import_kw_min": _sum_kw_min(df, "grid_buy_kw"),
+        "grid_import_kw_min": grid_import,
         "grid_export_kw_min": _sum_kw_min(df, "grid_sell_kw"),
+        "total_consumption_kw_min": total_consumption,
+        "self_consumption_pct": self_consumption_pct,
         "final_degraded_capacity_kw_min": float(df.select(pl.col("capacity_now_kw_min").tail(1)).item()),
         "final_soc_pct": float(df.select(pl.col("soc_fraction").tail(1)).item()) * 100.0,
         "cumulative_drawn_kw_min": float(df.select(pl.col("battery_draw_cumulative_kw_min").tail(1)).item()),

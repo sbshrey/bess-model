@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Output — BESS Control Room{% endblock %}
+{% block page_title %}Output Files{% endblock %}
+{% block topbar_note %}Browse outputs and view charts. Switch files via pills.{% endblock %}
+{% block content %}
+<main class="tab-content-main output-tab">
+  <section class="panel output-panel">
+    <div class="panel-header">
+      <div>
+        <h2>Output Files</h2>
+        <p class="section-subtitle">{{ output_dir }} · {{ outputs|length }} files</p>
+      </div>
+    </div>
+
+    {% if outputs %}
+    <div class="output-browser output-browser-with-charts">
+      <div class="output-file-list">
+        {% for item in outputs %}
+        <div class="output-file-card {% if selected_file == item.relative_path %}active{% endif %}">
+          <a href="{{ url_for('output_page', file=item.relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}" class="output-file-info" title="{{ item.name }}">
+            <span class="output-file-icon">{% if item.name.endswith('.csv') %}&#128196;{% elif item.name.endswith('.parquet') %}&#128451;{% else %}&#128462;{% endif %}</span>
+            <div class="output-file-meta">
+              <span class="output-file-name">{{ item.name }}</span>
+              <span class="output-file-size">{{ '%.1f'|format(item.size_kb) }} KB</span>
+            </div>
+          </a>
+          <div class="output-file-actions">
+            <a href="{{ url_for('download_file', relative_path=item.relative_path) }}" class="button button-ghost button-small">Download</a>
+            {% if item.name.endswith('.csv') %}
+            <a href="{{ url_for('edit_csv', relative_path=item.relative_path) }}" class="button button-ghost button-small">Edit</a>
+            <a href="{{ url_for('data_page', file=item.relative_path) }}" class="button button-ghost button-small">Preview</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="output-charts-section">
+        <div class="output-charts-header">
+          <h3>Charts</h3>
+          <div class="file-pills-row">
+            {% for item in outputs %}
+              {% if item.name.endswith('.csv') %}
+              <a href="{{ url_for('output_page', file=item.relative_path, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}"
+                 class="file-pill {% if selected_file == item.relative_path %}active{% endif %}">{{ item.name }}</a>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% if selected_file %}
+          <div class="output-charts-actions">
+            <a href="{{ url_for('dashboard', file=selected_file, start_date=date_filter.start_date if date_filter else '', end_date=date_filter.end_date if date_filter else '') }}" class="button button-ghost button-small">Also on Dashboard →</a>
+          </div>
+          {% endif %}
+        </div>
+        {% if date_filter and date_filter.enabled %}
+        <form method="get" action="{{ url_for('output_page') }}" class="date-filter-form">
+          <input type="hidden" name="file" value="{{ selected_file or '' }}">
+          <label class="date-filter-label"><span>Start</span><input type="date" name="start_date" value="{{ date_filter.start_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}"></label>
+          <label class="date-filter-label"><span>End</span><input type="date" name="end_date" value="{{ date_filter.end_date }}" min="{{ date_filter.min_date }}" max="{{ date_filter.max_date }}"></label>
+          <button type="submit" class="button button-ghost button-small">Apply</button>
+          <a class="button button-ghost button-small" href="{{ url_for('output_page', file=selected_file) }}">Clear</a>
+        </form>
+        <p class="filter-summary">Showing {{ date_filter.filtered_rows }} of {{ date_filter.total_rows }} rows.</p>
+        {% endif %}
+
+        {% if selected_file %}
+        <div class="output-charts-content" data-file-path="{{ selected_file }}">
+          {% if chart_cards %}
+          <div class="chart-grid output-chart-grid" data-chart-grid>
+            {% for chart in chart_cards %}
+            <article class="chart-card chart-card-large">
+              <div class="chart-card-head">
+                <div><h3>{{ chart.title }}</h3><p>{{ chart.subtitle }}</p></div>
+                <button type="button" class="button button-ghost button-small" data-chart-open data-chart-title="{{ chart.title }}" data-chart-subtitle="{{ chart.subtitle }}">Expand</button>
+              </div>
+              <div class="chart-wrap chart-wrap-large">{{ chart.svg|safe }}</div>
+            </article>
+            {% endfor %}
+          </div>
+          {% elif chart_svg %}
+          <div class="chart-wrap chart-wrap-large">{{ chart_svg|safe }}</div>
+          {% else %}
+          <p class="empty-state">Select a CSV file from the list or pills above.</p>
+          {% endif %}
+        </div>
+        {% if file_insights %}
+        <aside class="file-insights-panel output-insights">
+          <h3 class="file-insights-title">{{ file_insights.title }}</h3>
+          <p class="file-insights-desc">{{ file_insights.description }}</p>
+          <p class="file-insights-how"><strong>How:</strong> {{ file_insights.how }}</p>
+        </aside>
+        {% endif %}
+        {% else %}
+        <p class="empty-state">Select a CSV file from the list or pills to view charts.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <p class="empty-state">No output files yet. Run a simulation from the Configuration tab.</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

@@ -2,20 +2,38 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}BESS Control Room{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   </head>
   <body>
     <div class="page-shell">
-      <header class="topbar">
+      <header class="topbar topbar-with-nav">
         <div>
           <p class="eyebrow">BESS Control Room</p>
-          <h1 class="page-title">Operations Dashboard</h1>
+          <h1 class="page-title">{% block page_title %}Operations Dashboard{% endblock %}</h1>
         </div>
-        <p class="topbar-note">Configure, run, inspect, and recalculate from one workspace.</p>
+        <p class="topbar-note">{% block topbar_note %}Configure, run, inspect, and recalculate from one workspace.{% endblock %}</p>
       </header>
+      <nav class="main-nav" aria-label="Primary navigation">
+        <a href="{{ url_for('dashboard') }}" class="main-nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+          <span class="main-nav-icon" aria-hidden="true">&#9638;</span>
+          Dashboard
+        </a>
+        <a href="{{ url_for('config_page') }}" class="main-nav-link {% if request.endpoint == 'config_page' %}active{% endif %}">
+          <span class="main-nav-icon" aria-hidden="true">&#9881;</span>
+          Configuration
+        </a>
+        <a href="{{ url_for('output_page') }}" class="main-nav-link {% if request.endpoint == 'output_page' %}active{% endif %}">
+          <span class="main-nav-icon" aria-hidden="true">&#128462;</span>
+          Output
+        </a>
+        <a href="{{ url_for('data_page') }}" class="main-nav-link {% if request.endpoint == 'data_page' %}active{% endif %}">
+          <span class="main-nav-icon" aria-hidden="true">&#128202;</span>
+          Data Preview
+        </a>
+      </nav>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <section class="flash-stack">

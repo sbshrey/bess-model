@@ -84,6 +84,17 @@ class LoadConfig:
 
 
 @dataclass(frozen=True)
+class SizingConfig:
+    """Battery sizing sweep configuration."""
+
+    enabled: bool = True
+    capacities_kwh: list[float] = field(default_factory=lambda: [500.0, 750.0, 1000.0, 1250.0, 1500.0])
+    objective: str = "min_grid_import_then_smallest"
+    min_self_consumption_pct: float | None = None
+    max_cycles_per_year: float | None = None
+
+
+@dataclass(frozen=True)
 class BatteryConfig:
     """Battery power and energy constraints."""
 
@@ -142,11 +153,13 @@ class SimulationConfig:
     load: LoadConfig
     battery: BatteryConfig
     output_dir: str = "output"
+    sizing: SizingConfig | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SimulationConfig":
         """Build a typed config from a nested dictionary."""
         battery = _normalize_battery_payload(payload["battery"])
+        sizing = _normalize_sizing_payload(payload.get("sizing"))
         config = cls(
             plant_name=payload["plant_name"],
             data=DataConfig(**payload["data"]),
@@ -155,6 +168,7 @@ class SimulationConfig:
             load=LoadConfig(**payload["load"]),
             battery=BatteryConfig(**battery),
             output_dir=payload.get("output_dir", "output"),
+            sizing=sizing,
         )
         config.validate()
         return config
@@ -255,6 +269,29 @@ def _normalize_battery_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "discharge_efficiency": discharge_efficiency,
     }
 
+
+
+def _normalize_sizing_payload(payload: dict[str, Any] | None) -> SizingConfig | None:
+    """Parse sizing config from YAML. Returns None if not present or disabled."""
+    if not payload:
+        return None
+    if payload.get("enabled") is False:
+        return None
+    raw_caps = payload.get("capacities_kwh")
+    if raw_caps:
+        capacities = [float(c) for c in raw_caps]
+    else:
+        capacities = [500.0, 750.0, 1000.0, 1250.0, 1500.0]
+    constraints = payload.get("constraints") or {}
+    min_sc = constraints.get("min_self_consumption_pct")
+    max_cy = constraints.get("max_cycles_per_year")
+    return SizingConfig(
+        enabled=bool(payload.get("enabled", True)),
+        capacities_kwh=capacities,
+        objective=str(payload.get("objective", "min_grid_import_then_smallest")),
+        min_self_consumption_pct=float(min_sc) if min_sc is not None else None,
+        max_cycles_per_year=float(max_cy) if max_cy is not None else None,
+    )
 
 
 def _normalize_loss_table(
