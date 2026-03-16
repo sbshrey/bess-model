@@ -14,23 +14,59 @@ SOLAR_POWER_COLUMN = "Power in KW"
 WIND_TIMESTAMP_COLUMN = "time stamp"
 WIND_POWER_COLUMN = "Power in KW"
 
+# Hardcoded filenames under data_dir (paths are not user-editable)
+SOLAR_FILENAME = "Solar_2025-01-01_data_.csv"
+WIND_FILENAME = "Wind_2025_01-01_data_.csv"
+
 
 def load_generation_data(config: SimulationConfig) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Load and normalize solar and wind generation datasets."""
-    solar = _load_source_csv(
-        path=config.data.solar_path,
-        timestamp_column=SOLAR_TIMESTAMP_COLUMN,
-        power_column=SOLAR_POWER_COLUMN,
-        timestamp_format="%d/%m/%Y %H:%M",
-        source_name="solar",
-    )
+    """Load solar and/or wind from hardcoded paths under config.data.data_dir (or overrides for tests)."""
+    data_dir = config.data.data_dir or "data"
+    solar_path = config.data.solar_path_override or f"{data_dir.rstrip('/')}/{SOLAR_FILENAME}"
+    wind_path = config.data.wind_path_override or f"{data_dir.rstrip('/')}/{WIND_FILENAME}"
+    load_solar = config.data.solar_enabled
+    load_wind = config.data.wind_enabled
+
+    if not load_solar and not load_wind:
+        raise ValueError("At least one of solar_enabled or wind_enabled must be True.")
+
+    if load_solar and load_wind:
+        solar = _load_source_csv(
+            path=solar_path,
+            timestamp_column=SOLAR_TIMESTAMP_COLUMN,
+            power_column=SOLAR_POWER_COLUMN,
+            timestamp_format="%d/%m/%Y %H:%M",
+            source_name="solar",
+        )
+        wind = _load_source_csv(
+            path=wind_path,
+            timestamp_column=WIND_TIMESTAMP_COLUMN,
+            power_column=WIND_POWER_COLUMN,
+            timestamp_format="%Y-%m-%d %H:%M",
+            source_name="wind",
+        )
+        return solar, wind
+
+    if load_solar:
+        solar = _load_source_csv(
+            path=solar_path,
+            timestamp_column=SOLAR_TIMESTAMP_COLUMN,
+            power_column=SOLAR_POWER_COLUMN,
+            timestamp_format="%d/%m/%Y %H:%M",
+            source_name="solar",
+        )
+        wind = solar.select("timestamp").with_columns(pl.lit(0.0).cast(pl.Float32).alias("wind_kw"))
+        return solar, wind
+
+    # Wind only
     wind = _load_source_csv(
-        path=config.data.wind_path,
+        path=wind_path,
         timestamp_column=WIND_TIMESTAMP_COLUMN,
         power_column=WIND_POWER_COLUMN,
         timestamp_format="%Y-%m-%d %H:%M",
         source_name="wind",
     )
+    solar = wind.select("timestamp").with_columns(pl.lit(0.0).cast(pl.Float32).alias("solar_kw"))
     return solar, wind
 
 

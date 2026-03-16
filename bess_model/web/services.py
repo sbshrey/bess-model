@@ -120,7 +120,7 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
 
     # Keys that need special parsing
     skip_keys = {"config_text", "recalculate", "page", "page_size", "start_date", "end_date", "file"}
-    bool_keys = {"preprocessing.align_to_full_year", "sizing.enabled", "sizing.auto_sizing"}
+    bool_keys = {"preprocessing.align_to_full_year", "sizing.enabled", "sizing.auto_sizing", "data.solar_enabled", "data.wind_enabled"}
     list_float_keys = {"sizing.capacities_kwh"}
     nullable_float_keys = {
         "grid.import_limit_kw",
@@ -181,6 +181,13 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
                 current[part] = {}
             current = current[part]
         current[parts[-1]] = value
+
+    # Checkboxes: unchecked means key is absent; ensure data section has solar_enabled, wind_enabled, data_dir
+    if "data" not in yaml_data or not isinstance(yaml_data["data"], dict):
+        yaml_data["data"] = {}
+    yaml_data["data"].setdefault("data_dir", "data")
+    yaml_data["data"]["solar_enabled"] = str(form_data.get("data.solar_enabled", "")).lower() in ("true", "on", "1", "yes")
+    yaml_data["data"]["wind_enabled"] = str(form_data.get("data.wind_enabled", "")).lower() in ("true", "on", "1", "yes")
 
     updated_text = yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
     config_path.write_text(updated_text, encoding="utf-8")

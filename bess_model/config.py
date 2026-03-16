@@ -49,10 +49,13 @@ DEFAULT_DISCHARGE_LOSS_TABLE = {
 
 @dataclass(frozen=True)
 class DataConfig:
-    """Paths to source generation data."""
+    """Data source toggles. Paths are hardcoded under data_dir unless overrides set (e.g. tests)."""
 
-    solar_path: str
-    wind_path: str
+    data_dir: str = "data"
+    solar_enabled: bool = True
+    wind_enabled: bool = True
+    solar_path_override: str | None = None  # when set (e.g. tests), used instead of data_dir + filename
+    wind_path_override: str | None = None
 
 
 @dataclass(frozen=True)
@@ -167,9 +170,10 @@ class SimulationConfig:
         """Build a typed config from a nested dictionary."""
         battery = _normalize_battery_payload(payload["battery"])
         sizing = _normalize_sizing_payload(payload.get("sizing"))
+        data_payload = _normalize_data_payload(payload.get("data"))
         config = cls(
             plant_name=payload["plant_name"],
-            data=DataConfig(**payload["data"]),
+            data=DataConfig(**data_payload),
             preprocessing=PreprocessingConfig(**payload.get("preprocessing", {})),
             grid=GridConfig(**payload["grid"]),
             load=LoadConfig(**payload["load"]),
@@ -199,6 +203,8 @@ class SimulationConfig:
 
     def validate(self) -> None:
         """Validate critical configuration bounds."""
+        if not (self.data.solar_enabled or self.data.wind_enabled):
+            raise ValueError("At least one of data.solar_enabled or data.wind_enabled must be True.")
         if self.grid.export_limit_kw <= 0:
             raise ValueError("grid.export_limit_kw must be positive.")
         if self.battery.capacity_kwh < 0:
@@ -276,6 +282,36 @@ def _normalize_battery_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "discharge_efficiency": discharge_efficiency,
     }
 
+
+
+def _normalize_data_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Build data config dict: data_dir, solar_enabled, wind_enabled. Paths are hardcoded in loaders."""
+    if not payload:
+        return {"data_dir": "data", "solar_enabled": True, "wind_enabled": True}
+    raw = dict(payload)
+    # Legacy YAML: solar_path / wind_path -> infer enabled, data_dir, and overrides (for tests)
+    solar_path = raw.get("solar_path")
+    wind_path = raw.get("wind_path")
+    if solar_path is not None or wind_path is not None:
+        data_dir = "data"
+        if isinstance(solar_path, str) and "/" in solar_path:
+            data_dir = solar_path.rsplit("/", 1)[0]
+        elif isinstance(wind_path, str) and "/" in wind_path:
+            data_dir = wind_path.rsplit("/", 1)[0]
+        return {
+            "data_dir": data_dir,
+            "solar_enabled": bool(solar_path and str(solar_path).strip()),
+            "wind_enabled": bool(wind_path and str(wind_path).strip()),
+            "solar_path_override": str(solar_path) if solar_path else None,
+            "wind_path_override": str(wind_path) if wind_path else None,
+        }
+    return {
+        "data_dir": str(raw.get("data_dir", "data")),
+        "solar_enabled": bool(raw.get("solar_enabled", True)),
+        "wind_enabled": bool(raw.get("wind_enabled", True)),
+        "solar_path_override": raw.get("solar_path_override") or None,
+        "wind_path_override": raw.get("wind_path_override") or None,
+    }
 
 
 def _normalize_sizing_payload(payload: dict[str, Any] | None) -> SizingConfig | None:

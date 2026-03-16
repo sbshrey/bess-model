@@ -1,8 +1,9 @@
 plant_name: solar_wind_plant
 output_dir: output
 data:
-  solar_path: data/Solar_2025-01-01_data_.csv
-  wind_path: data/Wind_2025_01-01_data_.csv
+  data_dir: data
+  solar_enabled: true
+  wind_enabled: false
 preprocessing:
   frequency: 1m
   gap_fill: zero
@@ -16,12 +17,14 @@ load:
   output_profile_kw: 400.0
   aux_consumption_kw: 20.0
 battery:
-  nominal_power_kw: 500.0
+  nominal_power_kw: 1024000.0
   duration_hours: 2.0
-  initial_soc_fraction: 0.5
-  degradation_per_cycle: 0.0002739726027
   charge_efficiency: 0.96
   discharge_efficiency: 0.94
+  degradation_per_cycle: 0.0002739726027
+  initial_soc_fraction: 0.5
+  min_soc_fraction: 0.0
+  max_soc_fraction: 1.0
   charge_loss_table:
     0.2: 0.04
     0.3: 0.045
@@ -34,16 +37,30 @@ battery:
     0.5: 0.042
     1.0: 0.062
     1.2: 0.067
-  min_soc_fraction: 0.0
-  max_soc_fraction: 1.0
 sizing:
   enabled: true
+  auto_sizing: true
+  capacity_min_kwh: 2000.0
+  capacity_max_kwh: 1000000.0
+  auto_max_simulations: 15
+  improvement_threshold_pct: 100.0
+  target_self_consumption_pct: 90.0
   capacities_kwh:
   - 500.0
-  - 750.0
   - 1000.0
-  - 1250.0
-  - 1500.0
+  - 2000.0
+  - 4000.0
+  - 8000.0
+  - 16000.0
+  - 32000.0
+  - 64000.0
+  - 128000.0
+  - 256000.0
+  - 512000.0
+  - 1024000.0
+  - 2048000.0
+  - 4096000.0
+  - 8192000.0
   objective: min_grid_import_then_smallest
   constraints:
     min_self_consumption_pct: 90.0

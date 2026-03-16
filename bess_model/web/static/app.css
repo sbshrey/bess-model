@@ -64,6 +64,7 @@ body.modal-open {
   display: grid;
   grid-template-rows: auto auto 1fr;
   gap: clamp(12px, 2vw, 18px);
+  overflow-x: hidden;
 }
 
 /* ── Main Navigation ── */
@@ -117,6 +118,8 @@ body.modal-open {
   flex-direction: column;
   gap: 20px;
   padding-top: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* ── Topbar ── */
@@ -285,6 +288,8 @@ body.modal-open {
   box-shadow: var(--shadow);
   padding: 18px;
   transition: box-shadow var(--transition);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .sidebar-panel {
@@ -363,6 +368,7 @@ body.modal-open {
   padding: 18px;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .panel-header {
@@ -632,6 +638,46 @@ body.modal-open {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.form-section label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.form-section .input-checkbox {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.form-section-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.form-section label.read-only-path {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.form-section .read-only-path-label {
+  font-weight: 600;
+  min-width: 4rem;
+}
+
+.form-section .read-only-path-value {
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
 }
 
 .yaml-editor {
@@ -1217,12 +1263,18 @@ tbody tr:hover {
   align-items: center;
 }
 
+.config-visual-form {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .config-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 20px;
   margin-top: 16px;
   width: 100%;
+  max-width: 100%;
 }
 
 .form-section-group {
@@ -1265,6 +1317,8 @@ tbody tr:hover {
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 20px;
   min-height: 400px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .output-file-list {
@@ -1272,14 +1326,16 @@ tbody tr:hover {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  overflow-x: hidden;
   max-height: 60vh;
+  min-width: 0;
 }
 
 .output-file-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1299,11 +1355,9 @@ tbody tr:hover {
 
 .output-file-info {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  min-width: 120px;
-  flex: 1 1 0;
-  overflow: hidden;
+  min-width: 0;
   text-decoration: none;
   color: inherit;
 }
@@ -1315,7 +1369,6 @@ tbody tr:hover {
 
 .output-file-meta {
   min-width: 0;
-  overflow: hidden;
   flex: 1;
 }
 
@@ -1323,9 +1376,8 @@ tbody tr:hover {
   display: block;
   font-weight: 600;
   color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .output-file-info:hover .output-file-name {
@@ -1342,7 +1394,8 @@ tbody tr:hover {
   gap: 6px;
   flex-shrink: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
 }
 
 .output-preview-section {
@@ -1379,6 +1432,13 @@ tbody tr:hover {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.output-charts-content {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .output-charts-header {
@@ -2082,6 +2142,7 @@ tbody tr:hover {
   .table-shell {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    max-width: 100%;
   }
 
   .energy-table,
@@ -2091,6 +2152,11 @@ tbody tr:hover {
 
   table {
     min-width: 400px;
+  }
+
+  .form-section .input-field,
+  .form-section .code-textarea {
+    max-width: 100%;
   }
 
   .data-controls-form {
@@ -2121,6 +2187,12 @@ tbody tr:hover {
 
   .page-title {
     font-size: 1.35rem;
+  }
+
+  .energy-table,
+  .sizing-table,
+  table {
+    min-width: 320px;
   }
 
   .eyebrow {
@@ -2181,8 +2253,18 @@ tbody tr:hover {
     justify-content: flex-start;
   }
 
+  .output-file-actions .button {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+
   .config-form-footer {
     flex-direction: column;
+  }
+
+  .config-form-footer .button,
+  .config-actions .button {
+    min-height: 44px;
   }
 
   .config-form-footer .button {
@@ -2219,6 +2301,21 @@ tbody tr:hover {
   .main-nav-link {
     padding: 12px 14px;
     min-height: 44px;
+  }
+
+  .energy-table,
+  .sizing-table,
+  table {
+    min-width: 280px;
+  }
+
+  .output-file-card .button {
+    min-height: 44px;
+  }
+
+  .section-subtitle,
+  .topbar-note {
+    word-break: break-word;
   }
 
   .chart-wrap {

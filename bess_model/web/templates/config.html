@@ -28,10 +28,25 @@
         </div>
 
         <div class="form-section-group">
-          <h3 class="form-group-title">Data Source Paths</h3>
+          <h3 class="form-group-title">Data Sources</h3>
+          <p class="form-section-hint">Paths are fixed under the data folder. Toggle which sources to include.</p>
           <div class="form-section">
-            <label>Solar CSV Path <input type="text" name="data.solar_path" value="{{ config.data.solar_path }}" class="input-field"></label>
-            <label>Wind CSV Path <input type="text" name="data.wind_path" value="{{ config.data.wind_path }}" class="input-field"></label>
+            <label class="read-only-path">
+              <span class="read-only-path-label">Solar</span>
+              <code class="read-only-path-value">{{ config.data.data_dir }}/Solar_2025-01-01_data_.csv</code>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" name="data.solar_enabled" value="true" class="input-checkbox" {% if config.data.solar_enabled %}checked{% endif %}>
+              Include solar
+            </label>
+            <label class="read-only-path">
+              <span class="read-only-path-label">Wind</span>
+              <code class="read-only-path-value">{{ config.data.data_dir }}/Wind_2025_01-01_data_.csv</code>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" name="data.wind_enabled" value="true" class="input-checkbox" {% if config.data.wind_enabled %}checked{% endif %}>
+              Include wind
+            </label>
           </div>
         </div>
 
@@ -136,4 +151,18 @@
     </form>
   </section>
 </main>
+<script>
+(function () {
+  var form = document.getElementById('config-form-full');
+  if (!form) return;
+  form.addEventListener('submit', function () {
+    var solarCb = form.querySelector('input[name="data.solar_enabled"]');
+    var windCb = form.querySelector('input[name="data.wind_enabled"]');
+    if ((!solarCb || !solarCb.checked) && (!windCb || !windCb.checked)) {
+      event.preventDefault();
+      alert('At least one of Include solar or Include wind must be checked.');
+    }
+  });
+})();
+</script>
 {% endblock %}

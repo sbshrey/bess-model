@@ -14,8 +14,9 @@ config = SimulationConfig.from_yaml("config.example.yaml")
 plant_name: solar_wind_plant
 output_dir: output
 data:
-  solar_path: data/Solar_2025-01-01_data_.csv
-  wind_path: data/Wind_2025_01-01_data_.csv
+  data_dir: data
+  solar_enabled: true
+  wind_enabled: true
 preprocessing:
   frequency: 1m
   gap_fill: zero
@@ -60,10 +61,15 @@ battery:
 
 ### `data` (DataConfig)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `solar_path` | str | Path to solar generation CSV |
-| `wind_path` | str | Path to wind generation CSV |
+Input file paths are fixed under `data_dir` (not editable in the UI). Use toggles to choose which sources to include.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `data_dir` | str | `"data"` | Folder for input CSVs (relative path) |
+| `solar_enabled` | bool | `true` | Include solar generation from `data_dir/Solar_2025-01-01_data_.csv` |
+| `wind_enabled` | bool | `true` | Include wind generation from `data_dir/Wind_2025_01-01_data_.csv` |
+
+At least one of `solar_enabled` or `wind_enabled` must be true. Any combination is allowed (solar only, wind only, or both).
 
 **Expected CSV columns:**
 - Solar: `timestamp` (dd/mm/yyyy hh:mm), `Power in KW`
