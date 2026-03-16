@@ -14,8 +14,12 @@ Python framework for simulating and sizing a Battery Energy Storage System
 
 ## Quick Start
 
+Requires **Python 3.12+**.
+
+On **macOS / Linux**:
+
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
 python main.py --config config.example.yaml --mode simulate
@@ -23,6 +27,46 @@ python main.py --config config.example.yaml --mode simulate --dump-sections
 python main.py --config config.example.yaml --mode size
 bess-model-web --config config.example.yaml --host 127.0.0.1 --port 5000
 ```
+
+On **Windows (PowerShell)**:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .[dev]
+python main.py --config config.example.yaml --mode simulate
+python main.py --config config.example.yaml --mode simulate --dump-sections
+python main.py --config config.example.yaml --mode size
+bess-model-web --config config.example.yaml --host 127.0.0.1 --port 5000
+```
+
+## Docker Quick Start
+
+If you prefer not to install Python and dependencies on your host, you can run the app via Docker.
+
+Build the image:
+
+```bash
+docker build -t bess-model .
+```
+
+Run the web UI (http://localhost:5000), with outputs and config mounted from the current directory:
+
+```bash
+docker run --rm -p 5000:5000 \
+  -v "$PWD/output:/app/output" \
+  -v "$PWD/config.example.yaml:/app/config.example.yaml" \
+  -v "$PWD/data:/app/data" \
+  bess-model
+```
+
+Or with **Docker Compose**:
+
+```bash
+docker compose up --build
+```
+
+Then open `http://localhost:5000` in your browser.
 
 ## Summary Columns
 
