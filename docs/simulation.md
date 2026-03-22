@@ -65,6 +65,14 @@ With `--dump-sections`, the pipeline writes these CSVs:
 | `identity_2_failures` | BESS state violations |
 | `max_identity_error_kw` | Max identity 1 error |
 | `identity_2_max_error_kw_min` | Max identity 2 error (BESS state) |
+| `profile_template_id` | `flat` or the configured tender template id |
+| `required_dfr_pct` | Required monthly DFR threshold for the tender profile |
+| `min_monthly_dfr_pct` | Lowest monthly DFR observed in the run |
+| `months_below_dfr_threshold` | Count of months that miss the DFR threshold |
+| `annual_energy_target_kwh` | Tender annual energy target from the document multiplier |
+| `annual_profile_target_kwh` | Expanded tender-profile target energy for the simulated window |
+| `annual_profile_supplied_kwh` | Project-supplied energy allocated to the tender profile |
+| `annual_energy_gap_kwh` | `annual_energy_target_kwh - annual_profile_supplied_kwh` |
 
 ## Factors Leading to Grid Import Minimization
 
@@ -107,8 +115,19 @@ Scenarios 1–3 are supported by the sizing sweep. Run `python main.py --config 
 | `{plant}_minute_flows.parquet` | Full minute-level DataFrame |
 | `{plant}_summary.csv` | One-row summary metrics |
 | `{plant}_energy_table.csv` | Annual energy flows (SOURCES, USES, LOSS) in kW-min |
+| `{plant}_profile_compliance_blocks.csv` | Block-level tender compliance table (hourly for FDRE-V, 15-minute for FDRE-II) |
+| `{plant}_profile_compliance_monthly.csv` | Monthly DFR, required threshold, target/supplied energy, and pass/fail |
 | `{plant}_sections/` | Section CSVs (when `--dump-sections`) |
 | `{plant}_sizing_results.csv` | Capacity sweep: grid import, self-consumption %, recommended (when `--mode size`) |
+
+## Tender Template Mode
+
+When `load.profile_mode: template`, the model expands a static tender profile asset before section accounting:
+
+- `seci_fdre_v_amendment_03`: 24 hourly blocks, monthly DFR `75%`
+- `seci_fdre_ii_revised_annexure_b`: 96 quarter-hour blocks, monthly DFR `90%`
+
+The minute-level `03_output_profile.csv` stays time-varying in template mode, while compliance is computed at the tender block cadence. Monthly DFR is the arithmetic mean of block DFR values within each calendar month.
 
 ## Units and Conventions
 

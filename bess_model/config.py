@@ -82,8 +82,15 @@ class GridConfig:
 class LoadConfig:
     """Site load assumptions."""
 
-    output_profile_kw: float
-    aux_consumption_kw: float
+    output_profile_kw: float | None = None
+    aux_consumption_kw: float = 0.0
+    profile_mode: str = "flat"
+    profile_template_id: str | None = None
+    contracted_capacity_mw: float | None = None
+
+    @property
+    def uses_template_profile(self) -> bool:
+        return self.profile_mode == "template"
 
 
 @dataclass(frozen=True)
@@ -168,15 +175,23 @@ class SimulationConfig:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SimulationConfig":
         """Build a typed config from a nested dictionary."""
+        preprocessing_payload = dict(payload.get("preprocessing", {}))
+        raw_data_payload = payload.get("data") or {}
+        if "align_to_full_year" not in preprocessing_payload and (
+            raw_data_payload.get("solar_path") is not None or raw_data_payload.get("wind_path") is not None
+        ):
+            # Legacy path-based configs historically simulated only the observed data range.
+            preprocessing_payload["align_to_full_year"] = False
         battery = _normalize_battery_payload(payload["battery"])
         sizing = _normalize_sizing_payload(payload.get("sizing"))
-        data_payload = _normalize_data_payload(payload.get("data"))
+        data_payload = _normalize_data_payload(raw_data_payload)
+        load_payload = _normalize_load_payload(payload.get("load"))
         config = cls(
             plant_name=payload["plant_name"],
             data=DataConfig(**data_payload),
-            preprocessing=PreprocessingConfig(**payload.get("preprocessing", {})),
+            preprocessing=PreprocessingConfig(**preprocessing_payload),
             grid=GridConfig(**payload["grid"]),
-            load=LoadConfig(**payload["load"]),
+            load=LoadConfig(**load_payload),
             battery=BatteryConfig(**battery),
             output_dir=payload.get("output_dir", "output"),
             sizing=sizing,
@@ -203,10 +218,36 @@ class SimulationConfig:
 
     def validate(self) -> None:
         """Validate critical configuration bounds."""
+        from bess_model.profile_templates import SUPPORTED_TENDER_PROFILES
+
         if not (self.data.solar_enabled or self.data.wind_enabled):
             raise ValueError("At least one of data.solar_enabled or data.wind_enabled must be True.")
         if self.grid.export_limit_kw <= 0:
             raise ValueError("grid.export_limit_kw must be positive.")
+        if self.grid.import_limit_kw is not None and self.grid.import_limit_kw < 0:
+            raise ValueError("grid.import_limit_kw must be non-negative when provided.")
+        if self.load.aux_consumption_kw < 0:
+            raise ValueError("load.aux_consumption_kw must be non-negative.")
+        if self.load.profile_mode not in {"flat", "template"}:
+            raise ValueError("load.profile_mode must be either 'flat' or 'template'.")
+        if self.load.profile_mode == "flat":
+            if self.load.output_profile_kw is None:
+                raise ValueError("load.output_profile_kw is required in flat profile mode.")
+            if self.load.output_profile_kw < 0:
+                raise ValueError("load.output_profile_kw must be non-negative.")
+        else:
+            if not self.load.profile_template_id:
+                raise ValueError("load.profile_template_id is required in template profile mode.")
+            if self.load.profile_template_id not in SUPPORTED_TENDER_PROFILES:
+                supported = ", ".join(sorted(SUPPORTED_TENDER_PROFILES))
+                raise ValueError(
+                    f"Unsupported load.profile_template_id '{self.load.profile_template_id}'. "
+                    f"Expected one of: {supported}."
+                )
+            if self.load.contracted_capacity_mw is None:
+                raise ValueError("load.contracted_capacity_mw is required in template profile mode.")
+            if self.load.contracted_capacity_mw <= 0:
+                raise ValueError("load.contracted_capacity_mw must be positive in template profile mode.")
         if self.battery.capacity_kwh < 0:
             raise ValueError("battery.capacity_kwh must be non-negative.")
         if self.battery.duration_hours <= 0:
@@ -311,6 +352,25 @@ def _normalize_data_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         "wind_enabled": bool(raw.get("wind_enabled", True)),
         "solar_path_override": raw.get("solar_path_override") or None,
         "wind_path_override": raw.get("wind_path_override") or None,
+    }
+
+
+def _normalize_load_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Build load config dict with backward-compatible flat mode defaults."""
+    raw = dict(payload or {})
+    output_profile = raw.get("output_profile_kw")
+    contracted_capacity = raw.get("contracted_capacity_mw")
+    profile_template_id = raw.get("profile_template_id")
+    return {
+        "output_profile_kw": float(output_profile) if output_profile not in (None, "") else None,
+        "aux_consumption_kw": float(raw.get("aux_consumption_kw", 0.0)),
+        "profile_mode": str(raw.get("profile_mode", "flat")),
+        "profile_template_id": (
+            str(profile_template_id) if profile_template_id not in (None, "") else None
+        ),
+        "contracted_capacity_mw": (
+            float(contracted_capacity) if contracted_capacity not in (None, "") else None
+        ),
     }
 
 

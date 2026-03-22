@@ -78,10 +78,25 @@
 
         <div class="form-section-group">
           <h3 class="form-group-title">Grid & Load</h3>
+          <p class="form-section-hint">Use flat mode for a constant output load, or template mode for SECI tender-driven output profiles.</p>
           <div class="form-section">
             <label>Grid Export Limit (kW) <input type="number" step="any" name="grid.export_limit_kw" value="{{ config.grid.export_limit_kw }}" class="input-field"></label>
             <label>Grid Import Limit (kW) <input type="number" step="any" name="grid.import_limit_kw" value="{{ config.grid.import_limit_kw if config.grid.import_limit_kw is not none else '' }}" class="input-field" placeholder="null"></label>
-            <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw }}" class="input-field"></label>
+            <label>Profile Mode
+              <select name="load.profile_mode" class="input-field">
+                <option value="flat" {% if config.load.profile_mode == 'flat' %}selected{% endif %}>Flat</option>
+                <option value="template" {% if config.load.profile_mode == 'template' %}selected{% endif %}>Template</option>
+              </select>
+            </label>
+            <label>Tender Template
+              <select name="load.profile_template_id" class="input-field">
+                <option value="" {% if config.load.profile_template_id is none %}selected{% endif %}>None</option>
+                <option value="seci_fdre_v_amendment_03" {% if config.load.profile_template_id == 'seci_fdre_v_amendment_03' %}selected{% endif %}>SECI FDRE-V Amendment-03</option>
+                <option value="seci_fdre_ii_revised_annexure_b" {% if config.load.profile_template_id == 'seci_fdre_ii_revised_annexure_b' %}selected{% endif %}>SECI FDRE-II Revised Annexure-B</option>
+              </select>
+            </label>
+            <label>Contracted Capacity (MW) <input type="number" step="any" name="load.contracted_capacity_mw" value="{{ config.load.contracted_capacity_mw if config.load.contracted_capacity_mw is not none else '' }}" class="input-field" placeholder="Required in template mode"></label>
+            <label>Output Profile (kW) <input type="number" step="any" name="load.output_profile_kw" value="{{ config.load.output_profile_kw if config.load.output_profile_kw is not none else '' }}" class="input-field" placeholder="Used in flat mode"></label>
             <label>Aux Consumption (kW) <input type="number" step="any" name="load.aux_consumption_kw" value="{{ config.load.aux_consumption_kw }}" class="input-field"></label>
           </div>
         </div>

@@ -4,6 +4,29 @@
 {% block topbar_note %}Overview, metrics, and charts from all output files.{% endblock %}
 {% block content %}
 <main class="tab-content-main dashboard-tab">
+  <div class="dashboard-expand-toolbar">
+    <button type="button" class="button button-ghost button-small" data-sidebar-toggle aria-expanded="true">Collapse</button>
+  </div>
+  <div class="dashboard-layout output-browser-with-charts">
+    <aside class="panel dashboard-sidebar" data-dashboard-sidebar>
+      <div class="sidebar-card-head">
+        <div>
+          <h2>Outputs</h2>
+          <p class="section-subtitle">Quick access to generated CSVs and summaries.</p>
+        </div>
+        <button type="button" class="button button-ghost button-small" data-sidebar-toggle aria-expanded="true">Collapse</button>
+      </div>
+      <div class="output-scroll output-file-list">
+        {% for item in outputs %}
+        <a href="{{ url_for('dashboard', file=item.relative_path) }}" class="output-file-card {% if selected_file == item.relative_path %}active{% endif %}">
+          <span class="output-file-name">{{ item.name }}</span>
+          <span class="output-file-size">{{ "%.1f"|format(item.size_kb) }} KB</span>
+        </a>
+        {% endfor %}
+      </div>
+    </aside>
+
+    <div class="content dashboard-content">
   <section class="metric-grid">
     {% for metric in metric_cards %}
       <article class="metric-card">
@@ -169,5 +192,7 @@
       {% endif %}
     </div>
   </section>
+    </div>
+  </div>
 </main>
 {% endblock %}

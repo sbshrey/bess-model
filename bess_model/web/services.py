@@ -18,6 +18,7 @@ from bess_model.config import SimulationConfig
 from bess_model.core.pipeline import (
     FLOW_STAGES,
     SimulationContext,
+    build_simulation_result,
     compute_summary_metrics,
     load_aligned_inputs,
     simulate_system,
@@ -124,12 +125,15 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
     list_float_keys = {"sizing.capacities_kwh"}
     nullable_float_keys = {
         "grid.import_limit_kw",
+        "load.output_profile_kw",
+        "load.contracted_capacity_mw",
         "sizing.constraints.min_self_consumption_pct",
         "sizing.constraints.max_cycles_per_year",
         "sizing.capacity_min_kwh",
         "sizing.capacity_max_kwh",
         "sizing.target_self_consumption_pct",
     }
+    nullable_string_keys = {"load.profile_template_id"}
 
     for key, raw_value in form_data.items():
         if key in skip_keys:
@@ -169,6 +173,9 @@ def save_config_form(config_path: Path, form_data: dict[str, str]) -> Simulation
                         value = float(text)
                     except (TypeError, ValueError):
                         value = None
+            elif key in nullable_string_keys:
+                text = (raw_value or "").strip()
+                value = text or None
             elif isinstance(value, str) and value.replace(".", "", 1).replace("-", "", 1).isdigit() and "." in value:
                 value = float(value)
             elif isinstance(value, str) and value.replace("-", "", 1).isdigit():
@@ -260,6 +267,16 @@ def get_file_insights(relative_path: str | None) -> dict[str, str] | None:
             "description": "Annual energy flows: SOURCES, USES, LOSS (kW-min).",
             "how": "Sums solar, wind, BESS draw, grid import (sources); charge BESS, sell to grid, output (uses); discharge and charge losses.",
         },
+        "profile_compliance_blocks": {
+            "title": "Tender compliance by block",
+            "description": "Block-level DFR compliance at the tender cadence.",
+            "how": "Aggregates minute-level profile target and project-supplied energy into hourly or 15-minute blocks, then computes block_dfr = min(supplied / target, 1).",
+        },
+        "profile_compliance_monthly": {
+            "title": "Tender compliance by month",
+            "description": "Monthly DFR pass/fail view for the configured tender profile.",
+            "how": "Averages block DFR values within each month, compares against the template required_dfr threshold, and reports target/supplied energy.",
+        },
         "00_aligned_input": {
             "title": "Aligned input",
             "description": "Solar and wind generation aligned to a 1-minute grid.",
@@ -278,7 +295,7 @@ def get_file_insights(relative_path: str | None) -> dict[str, str] | None:
         "03_output_profile": {
             "title": "Output profile",
             "description": "Site load and total consumption per minute.",
-            "how": "output_profile_kw + aux_consumption_kw = total_consumption_kw from config.",
+            "how": "Flat mode uses a constant output_profile_kw. Template mode expands the configured tender profile by month and block, then adds aux_consumption_kw.",
         },
         "04_battery_capacity_cycles": {
             "title": "Battery capacity & degradation",
@@ -375,12 +392,17 @@ def choose_default_output_file(config: SimulationConfig, outputs: list[OutputFil
     if not outputs:
         return None
 
-    preferred = [
-        f"{config.plant_name}_sections/00_aligned_input.csv",
-        f"{config.plant_name}_sections/11_soc_calculations.csv",
-        f"{config.plant_name}_sections/06_battery_opening_closing.csv",
-        f"{config.plant_name}_summary.csv",
-    ]
+    preferred = []
+    if config.load.uses_template_profile:
+        preferred.append(f"{config.plant_name}_profile_compliance_monthly.csv")
+    preferred.extend(
+        [
+            f"{config.plant_name}_sections/00_aligned_input.csv",
+            f"{config.plant_name}_sections/11_soc_calculations.csv",
+            f"{config.plant_name}_sections/06_battery_opening_closing.csv",
+            f"{config.plant_name}_summary.csv",
+        ]
+    )
     by_path = {item.relative_path: item for item in outputs}
     for relative_path in preferred:
         if relative_path in by_path:
@@ -550,6 +572,32 @@ def load_metric_cards(config: SimulationConfig) -> list[MetricCard]:
                 "BESS state max error",
             )
         )
+    if row.get("profile_template_id") not in (None, "", "flat"):
+        cards.extend(
+            [
+                MetricCard("Profile Template", str(row.get("profile_template_id")), "Tender-driven output profile"),
+                MetricCard(
+                    "Required DFR",
+                    _format_number(row.get("required_dfr_pct", 0), digits=1) + "%",
+                    "Monthly threshold",
+                ),
+                MetricCard(
+                    "Min Monthly DFR",
+                    _format_number(row.get("min_monthly_dfr_pct", 0), digits=1) + "%",
+                    "Worst monthly compliance",
+                ),
+                MetricCard(
+                    "Months Below DFR",
+                    _format_number(row.get("months_below_dfr_threshold", 0), digits=0),
+                    "Monthly threshold misses",
+                ),
+                MetricCard(
+                    "Annual Energy Gap",
+                    _format_number(row.get("annual_energy_gap_kwh", 0)) + " kWh",
+                    "Tender target minus supplied profile energy",
+                ),
+            ]
+        )
     return cards
 
 
@@ -657,12 +705,8 @@ def recalculate_from_edited_output(config: SimulationConfig, relative_path: str)
     written: list[Path] = [path]
     written.extend(write_section_outputs(result_df, section_dir))
 
-    summary = compute_summary_metrics(result_df, config.plant_name)
-    write_simulation_outputs(
-        SimulationResult(minute_flows=result_df, summary_metrics=summary),
-        config.output_dir,
-        config.plant_name,
-    )
+    result = build_simulation_result(result_df, config)
+    write_simulation_outputs(result, config.output_dir, config.plant_name)
     return written
 
 
@@ -791,6 +835,17 @@ def build_chart_cards(
                 "Cumulative Charge Count",
                 "Cumulative charge count",
                 ["cum_charge_count"],
+            )
+        )
+
+    if {"monthly_dfr_pct", "required_dfr_pct"}.issubset(columns):
+        charts.append(
+            _chart_card(
+                df,
+                "Monthly DFR Compliance",
+                "Monthly DFR against the required threshold",
+                ["monthly_dfr_pct", "required_dfr_pct"],
+                x_column="month_index" if "month_index" in columns else "month",
             )
         )
 

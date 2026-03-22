@@ -76,8 +76,8 @@ def create_app(config_path: str | Path = "config.example.yaml") -> Flask:
 
     @app.get("/")
     def index():
-        """Redirect to dashboard tab."""
-        return redirect(url_for("dashboard"))
+        """Render the dashboard on the root route."""
+        return dashboard()
 
     @app.get("/dashboard")
     def dashboard():

@@ -36,6 +36,7 @@ include-package-data = true
 include = ["bess_model*"]
 
 [tool.setuptools.package-data]
+"bess_model" = ["profile_assets/*.csv"]
 "bess_model.web" = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]

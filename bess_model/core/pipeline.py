@@ -14,6 +14,10 @@ from bess_model.config import SimulationConfig
 from bess_model.data.loaders import load_generation_data
 from bess_model.data.preprocessing import align_generation_to_minute
 from bess_model.flows.section_outputs import section_accounting_stage, write_section_outputs
+from bess_model.profile_templates import (
+    compute_profile_compliance_tables,
+    compute_profile_summary_metrics,
+)
 from bess_model.results import SimulationResult
 
 StageFn = Callable[[pl.DataFrame, "SimulationContext"], pl.DataFrame]
@@ -70,8 +74,7 @@ def simulate_system(
     gc.collect()
 
     context._progress("Summary", 90, "Computing summary metrics")
-    metrics = compute_summary_metrics(final_df, config.plant_name)
-    return SimulationResult(minute_flows=final_df, summary_metrics=metrics)
+    return build_simulation_result(final_df, config)
 
 
 def load_aligned_inputs(config: SimulationConfig) -> tuple[pl.DataFrame, SimulationContext]:
@@ -97,15 +100,38 @@ def run_pipeline(
     return result
 
 
-def compute_summary_metrics(df: pl.DataFrame, plant_name: str) -> dict[str, float | int | str]:
+def build_simulation_result(df: pl.DataFrame, config: SimulationConfig) -> SimulationResult:
+    """Attach compliance tables and summary metrics to a completed minute-flow table."""
+    block_df, monthly_df = compute_profile_compliance_tables(df, config.load)
+    metrics = compute_summary_metrics(
+        df,
+        config,
+        profile_compliance_blocks=block_df,
+        profile_compliance_monthly=monthly_df,
+    )
+    return SimulationResult(
+        minute_flows=df,
+        summary_metrics=metrics,
+        profile_compliance_blocks=block_df,
+        profile_compliance_monthly=monthly_df,
+    )
+
+
+def compute_summary_metrics(
+    df: pl.DataFrame,
+    config: SimulationConfig,
+    *,
+    profile_compliance_blocks: pl.DataFrame | None = None,
+    profile_compliance_monthly: pl.DataFrame | None = None,
+) -> dict[str, float | int | str | None]:
     """Aggregate minute-level section outputs into KPI metrics (values in kW-min for consistency)."""
     grid_import = _sum_kw_min(df, "grid_buy_kw")
     total_consumption = _sum_kw_min(df, "total_consumption_kw")
     self_consumption_pct = (
         100.0 * (1.0 - grid_import / total_consumption) if total_consumption > 0 else 100.0
     )
-    return {
-        "plant_name": plant_name,
+    metrics: dict[str, float | int | str | None] = {
+        "plant_name": config.plant_name,
         "rows": df.height,
         "grid_import_kw_min": grid_import,
         "grid_export_kw_min": _sum_kw_min(df, "grid_sell_kw"),
@@ -121,6 +147,14 @@ def compute_summary_metrics(df: pl.DataFrame, plant_name: str) -> dict[str, floa
         "max_identity_error_kw": float(df.select(pl.col("identity_1_error_kw").abs().max()).item()),
         "identity_2_max_error_kw_min": float(df.select(pl.col("identity_2_error_kw_min").abs().max()).item()),
     }
+    metrics.update(
+        compute_profile_summary_metrics(
+            config.load,
+            monthly_df=profile_compliance_monthly,
+            block_df=profile_compliance_blocks,
+        )
+    )
+    return metrics
 
 
 def write_simulation_outputs(result: SimulationResult, output_dir: str | Path, stem: str) -> tuple[Path, Path]:
@@ -130,10 +164,20 @@ def write_simulation_outputs(result: SimulationResult, output_dir: str | Path, s
     parquet_path = target_dir / f"{stem}_minute_flows.parquet"
     metrics_path = target_dir / f"{stem}_summary.csv"
     energy_table_path = target_dir / f"{stem}_energy_table.csv"
+    compliance_blocks_path = target_dir / f"{stem}_profile_compliance_blocks.csv"
+    compliance_monthly_path = target_dir / f"{stem}_profile_compliance_monthly.csv"
     result.minute_flows.write_parquet(parquet_path)
     pl.DataFrame([result.summary_metrics]).write_csv(metrics_path)
     energy_rows = compute_energy_table(result.minute_flows)
     pl.DataFrame(energy_rows).write_csv(energy_table_path)
+    if result.profile_compliance_blocks is not None:
+        result.profile_compliance_blocks.write_csv(compliance_blocks_path)
+    elif compliance_blocks_path.exists():
+        compliance_blocks_path.unlink()
+    if result.profile_compliance_monthly is not None:
+        result.profile_compliance_monthly.write_csv(compliance_monthly_path)
+    elif compliance_monthly_path.exists():
+        compliance_monthly_path.unlink()
     return parquet_path, metrics_path
 
 

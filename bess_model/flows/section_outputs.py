@@ -11,6 +11,7 @@ import bisect
 
 import numpy as np
 import polars as pl
+from bess_model.profile_templates import build_load_profile_frame
 
 if TYPE_CHECKING:
     from bess_model.config import BatteryConfig
@@ -37,7 +38,7 @@ OUTPUT_SECTIONS: tuple[OutputSection, ...] = (
     ),
     OutputSection(
         "03_output_profile.csv",
-        "Output Profile for 24 Hours",
+        "Output Profile",
         ("timestamp", "output_profile_kw", "aux_consumption_kw", "total_consumption_kw"),
     ),
     OutputSection(
@@ -116,17 +117,20 @@ def section_accounting_stage(df: pl.DataFrame, context: SimulationContext) -> pl
     solar = df["solar_kw"].to_numpy()
     if "output_profile_kw" in df.columns:
         output_profile = df["output_profile_kw"].to_numpy()
-    else:
-        output_profile = np.full(df.height, context.config.load.output_profile_kw, dtype=np.float64)
     if "aux_consumption_kw" in df.columns:
         aux_consumption = df["aux_consumption_kw"].to_numpy()
-    else:
-        aux_consumption = np.full(df.height, context.config.load.aux_consumption_kw, dtype=np.float64)
     if "total_consumption_kw" in df.columns:
         total_consumption = df["total_consumption_kw"].to_numpy()
     elif "site_load_kw" in df.columns:
         total_consumption = df["site_load_kw"].to_numpy()
     else:
+        load_frame = build_load_profile_frame(df["timestamp"], context.config.load)
+        output_profile = load_frame["output_profile_kw"].to_numpy()
+        aux_consumption = load_frame["aux_consumption_kw"].to_numpy()
+        total_consumption = load_frame["total_consumption_kw"].to_numpy()
+    if "output_profile_kw" in df.columns and "aux_consumption_kw" not in df.columns:
+        aux_consumption = np.full(df.height, context.config.load.aux_consumption_kw, dtype=np.float64)
+    if "output_profile_kw" in df.columns and "total_consumption_kw" not in df.columns and "site_load_kw" not in df.columns:
         total_consumption = output_profile + aux_consumption
     progress_cb = getattr(context, "progress_callback", None) or (
         getattr(context, "_progress", None)

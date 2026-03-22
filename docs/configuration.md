@@ -25,6 +25,9 @@ grid:
   export_limit_kw: 400.0
   import_limit_kw: ''        # null or '' for no limit
 load:
+  profile_mode: flat
+  profile_template_id: null
+  contracted_capacity_mw: null
   output_profile_kw: 400.0
   aux_consumption_kw: 20.0
 battery:
@@ -85,6 +88,8 @@ At least one of `solar_enabled` or `wind_enabled` must be true. Any combination 
 | `align_to_full_year` | bool | `true` | If true, aligned output spans full calendar year (525,600 or 527,040 rows); timestamps outside source data get zero fill |
 | `simulation_dtype` | str | `"float32"` | NumPy dtype for simulation arrays: `float32` (lower memory, ~50% less) or `float64` (higher precision). Use `float32` for Render/memory-limited environments |
 
+Legacy configs that use explicit `data.solar_path` / `data.wind_path` and omit `align_to_full_year` default to source-range alignment for backward compatibility. Set `align_to_full_year` explicitly to override that behavior.
+
 ### `grid` (GridConfig)
 
 | Field | Type | Description |
@@ -96,10 +101,15 @@ At least one of `solar_enabled` or `wind_enabled` must be true. Any combination 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `output_profile_kw` | float | Output load (kW) |
+| `profile_mode` | str | `flat` for a constant output load, `template` for a tender-driven output profile |
+| `profile_template_id` | str \| None | Tender profile id: `seci_fdre_v_amendment_03` or `seci_fdre_ii_revised_annexure_b` |
+| `contracted_capacity_mw` | float \| None | Contracted capacity used to scale the tender profile |
+| `output_profile_kw` | float \| None | Constant output load (kW), required in `flat` mode |
 | `aux_consumption_kw` | float | Auxiliary consumption (kW) |
 
-Total consumption = `output_profile_kw + aux_consumption_kw`.
+In `flat` mode, total consumption = `output_profile_kw + aux_consumption_kw`.
+
+In `template` mode, `output_profile_kw` is expanded from the selected tender profile by month and block, scaled by `contracted_capacity_mw / base_capacity_mw`, then combined with `aux_consumption_kw`.
 
 ### `battery` (BatteryConfig)
 
